@@ -16,7 +16,7 @@ func CreateTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
 	if user.TeamID != "" {
-		return &fiber.Error{Code: 400, Message: "User is already in a team"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	type CreateTeamInput struct {
@@ -25,17 +25,17 @@ func CreateTeam(c *fiber.Ctx) error {
 	}
 	var input CreateTeamInput
 	if err := c.BodyParser(&input); err != nil {
-		return &fiber.Error{Code: 400, Message: "Invalid request body"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" {
-		return &fiber.Error{Code: 400, Message: "Team name is required"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team name is required"})
 	}
 
 	db := initializer.Database.Db
 	tx := db.Begin()
 	if tx.Error != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to start transaction"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start transaction"})
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -63,7 +63,7 @@ func CreateTeam(c *fiber.Ctx) error {
 	}
 	if createErr != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to create team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create team"})
 	}
 
 	var freshUser models.User
@@ -72,11 +72,11 @@ func CreateTeam(c *fiber.Ctx) error {
 		Where("id = ?", user.ID).
 		First(&freshUser).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to load user"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
 	if freshUser.TeamID != "" {
 		tx.Rollback()
-		return &fiber.Error{Code: 400, Message: "User is already in a team"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	res := tx.Model(&models.User{}).
@@ -84,15 +84,15 @@ func CreateTeam(c *fiber.Ctx) error {
 		Update("team_id", team.ID)
 	if res.Error != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to assign user to team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to assign user to team"})
 	}
 	if res.RowsAffected == 0 {
 		tx.Rollback()
-		return &fiber.Error{Code: 409, Message: "Team assignment race, please retry"}
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Team assignment race, please retry"})
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to finalize team creation"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize team creation"})
 	}
 
 	if err := db.Preload("Users").First(&team, "id = ?", team.ID).Error; err == nil {
@@ -115,12 +115,12 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 
 	var body models.TeamJoinSchema
 	if err := c.BodyParser(&body); err != nil {
-		return &fiber.Error{Code: 400, Message: "Invalid request body"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
 	teamCode := strings.TrimSpace(body.Code)
 	if teamCode == "" {
-		return &fiber.Error{Code: 400, Message: "Team code is required"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team code is required"})
 	}
 
 	const maxTeamSize int64 = 2
@@ -128,7 +128,7 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 
 	tx := db.Begin()
 	if tx.Error != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to start transaction"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start transaction"})
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -143,23 +143,22 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		First(&team).Error; err != nil {
 		tx.Rollback()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &fiber.Error{Code: 404, Message: "Team not found"}
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Team not found"})
 		}
-		return &fiber.Error{Code: 500, Message: "Failed to retrieve team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve team"})
 	}
 
-	// Re-check user inside txn
 	var freshUser models.User
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("id = ?", user.ID).
 		First(&freshUser).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to load user"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
 	if freshUser.TeamID != "" {
 		tx.Rollback()
-		return &fiber.Error{Code: 400, Message: "User is already in a team"}
+		return c.Status(400).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	var memberCount int64
@@ -167,11 +166,11 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		Where("team_id = ?", team.ID).
 		Count(&memberCount).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to count team members"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to count team members"})
 	}
 	if memberCount >= maxTeamSize {
 		tx.Rollback()
-		return &fiber.Error{Code: 400, Message: "Team is full"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team is full"})
 	}
 
 	// Join the team (with guard)
@@ -180,15 +179,15 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		Update("team_id", team.ID)
 	if res.Error != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to join team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to join team"})
 	}
 	if res.RowsAffected == 0 {
 		tx.Rollback()
-		return &fiber.Error{Code: 400, Message: "User is already in a team"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to join team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to join team"})
 	}
 
 	// Load users for the response
@@ -212,7 +211,7 @@ func LeaveTeam(c *fiber.Ctx) error {
 	db := initializer.Database.Db
 	tx := db.Begin()
 	if tx.Error != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to start transaction"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start transaction"})
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -227,12 +226,12 @@ func LeaveTeam(c *fiber.Ctx) error {
 		Where("id = ?", user.ID).
 		First(&freshUser).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to load user"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
 
 	if freshUser.TeamID == "" {
 		tx.Rollback()
-		return &fiber.Error{Code: 400, Message: "User is not in a team"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
 	}
 
 	oldTeamID := freshUser.TeamID
@@ -242,20 +241,20 @@ func LeaveTeam(c *fiber.Ctx) error {
 		Update("team_id", gorm.Expr("NULL"))
 	if res.Error != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to leave team"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to leave team"})
 	}
 	if res.RowsAffected == 0 {
 		tx.Rollback()
-		return &fiber.Error{Code: 409, Message: "Team membership changed, please retry"}
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Team membership changed, please retry"})
 	}
 
 	if err := tx.Exec("DELETE FROM team_users WHERE user_id = ? AND team_id = ?", freshUser.ID, oldTeamID).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to update team membership"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team membership"})
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to finalize leave"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize leave"})
 	}
 
 	return c.JSON(fiber.Map{

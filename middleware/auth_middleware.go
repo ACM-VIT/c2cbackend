@@ -83,7 +83,6 @@ func FirebaseClaims() fiber.Handler {
 
 		authClient, err := initializer.FirebaseApp.Auth(context.Background())
 		if err != nil {
-			// Infra issue should not block public routes
 			log.Println("FirebaseClaims auth client error:", err)
 			return c.Next()
 		}

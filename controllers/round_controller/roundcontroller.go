@@ -290,7 +290,7 @@ func PromoteToRound(c *fiber.Ctx) error {
 			inCurrentSet[id] = struct{}{}
 		}
 		for _, id := range body.TeamIDs {
-			if _, ok := exists[id]; ok { // only report for existing teams
+			if _, ok := exists[id]; ok {
 				if _, ok2 := inCurrentSet[id]; !ok2 {
 					resp.NotInCurrent = append(resp.NotInCurrent, id)
 				}
@@ -350,23 +350,30 @@ func PromoteToRound(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
+
+// UNTESTED VIBE CODED FUNCTION
 func AssignAllToRound(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok || user.Role != models.RoleAdmin {
-		return &fiber.Error{Code: 403, Message: "Only admins can assign teams to rounds"}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Only admins can assign teams to rounds",
+		})
 	}
 
 	roundNumber, err := strconv.Atoi(c.Params("rno"))
 	if err != nil || roundNumber < 1 {
-		return &fiber.Error{Code: 400, Message: "Invalid round number"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid round number",
+		})
 	}
 
 	db := initializer.Database.Db
 
-	// Start a transaction for safety
 	tx := db.Begin()
 	if tx.Error != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to start transaction"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to start transaction",
+		})
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -378,30 +385,37 @@ func AssignAllToRound(c *fiber.Ctx) error {
 	if err := tx.Where("round_number = ?", roundNumber).First(&round).Error; err != nil {
 		tx.Rollback()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &fiber.Error{Code: 404, Message: "Round not found"}
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Round not found",
+			})
 		}
-		return &fiber.Error{Code: 500, Message: "Failed to fetch round"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch round",
+		})
 	}
 
-	// Fetch only the IDs for efficiency
 	var teams []models.Team
 	if err := tx.Select("id").Find(&teams).Error; err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to fetch teams"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch teams",
+		})
 	}
 
-	// If you want "assign all" to mean "exactly all teams" (idempotent),
-	// use Replace (clears existing + inserts new in one step).
 	if err := tx.Model(&round).Association("Teams").Replace(&teams); err != nil {
 		tx.Rollback()
-		return &fiber.Error{Code: 500, Message: "Failed to assign teams to round"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to assign teams to round",
+		})
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to commit transaction"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to commit transaction",
+		})
 	}
 
-	return c.Status(200).JSON(fiber.Map{
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"round_id":     round.ID,
 		"round_number": roundNumber,
 		"assigned":     len(teams),

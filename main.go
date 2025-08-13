@@ -9,6 +9,7 @@ import (
 )
 
 func SetupRoutes(app *fiber.App) {
+	//JUGAAD FLOW NEEDS FIX (NO FUNCTIONALITY ISSUE , BUT WILL CHANGE IF TIME PERSISTS)
 	public := app.Group("/api/v1", middleware.FirebaseClaims())
 	routers.PubSet(public)
 

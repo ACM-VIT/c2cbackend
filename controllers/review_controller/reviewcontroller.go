@@ -41,12 +41,12 @@ func PostReview(c *fiber.Ctx) error {
 	err = db.Transaction(func(tx *gorm.DB) error {
 		var round models.Round
 		if err := tx.Where("round_number = ?", rno).First(&round).Error; err != nil {
-			return fiber.ErrNotFound
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
 		}
 
 		var team models.Team
 		if err := tx.Where("id = ?", teamID).First(&team).Error; err != nil {
-			return fiber.ErrBadRequest
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
 		}
 
 		var cnt int64
@@ -56,7 +56,7 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 		if cnt == 0 {
-			return fiber.ErrBadRequest
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "team not in this round"})
 		}
 
 		var exists int64
@@ -132,12 +132,12 @@ func PostReview(c *fiber.Ctx) error {
 func DeleteReview(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 	if user.Role != models.RoleAdmin {
-		return &fiber.Error{Code: 403, Message: "Only admins can delete reviews"}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can delete reviews"})
 	}
 
 	reviewID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return &fiber.Error{Code: 400, Message: "Invalid review id"}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid review id"})
 	}
 
 	db := initializer.Database.Db
@@ -146,29 +146,26 @@ func DeleteReview(c *fiber.Ctx) error {
 		var review models.Review
 		if err := tx.Where("id = ?", reviewID).First(&review).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return &fiber.Error{Code: 404, Message: "Review not found"}
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Review not found"})
 			}
-			return &fiber.Error{Code: 500, Message: "Failed to load review"}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load review"})
 		}
 
 		// Delete all Scores for this review (ScoreDetail has OnDelete:CASCADE to Score)
 		if err := tx.Where("review_id = ?", review.ID).Delete(&models.Score{}).Error; err != nil {
-			return &fiber.Error{Code: 500, Message: "Failed to delete linked scores"}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete linked scores"})
 		}
 
 		// Finally delete the review
 		if err := tx.Delete(&review).Error; err != nil {
-			return &fiber.Error{Code: 500, Message: "Failed to delete review"}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete review"})
 		}
 		return nil
 	}); err != nil {
-		if fe, ok := err.(*fiber.Error); ok {
-			return fe
-		}
-		return &fiber.Error{Code: 500, Message: "Failed to delete review"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete review"})
 	}
 
-	return c.Status(200).JSON(fiber.Map{"message": "Review deleted successfully"})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Review deleted successfully"})
 }
 
 // YE NAHI CHAL RAHA LIKHNE ME AALAS PLEASE WILL DO LATER
@@ -176,12 +173,12 @@ func GetReviews(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
 	if user.Role != models.RoleAdmin {
-		return &fiber.Error{Code: 403, Message: "Only admins can view reviews"}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can view reviews"})
 	}
 
 	var reviews []models.Review
 	if err := initializer.Database.Db.Find(&reviews).Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to retrieve reviews"}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve reviews"})
 	}
 
 	return c.Status(200).JSON(reviews)
