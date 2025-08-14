@@ -6,17 +6,16 @@ import (
 	"os"
 
 	firebase "firebase.google.com/go/v4"
-	"github.com/joho/godotenv"
 	"google.golang.org/api/option"
 )
 
 var FirebaseApp *firebase.App
 
 func InitFirebase() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Println("No .env file found, using environment variables")
-	}
+	// err := godotenv.Load(".env")
+	// if err != nil {
+	// 	log.Println("No .env file found, using environment variables")
+	// }
 
 	credentialsVal := os.Getenv("SERVICE_CREDS")
 	if credentialsVal == "" {
