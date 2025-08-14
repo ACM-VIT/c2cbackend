@@ -71,7 +71,7 @@
   "name": "Round 1",
   "round_number": 1,
   "description": "Initial qualifying round"
-}
+} 
 ```
 
 ---
