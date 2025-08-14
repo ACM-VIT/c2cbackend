@@ -16,3 +16,10 @@ type PromoteResponse struct {
 	NotInCurrent     []uuid.UUID `json:"not_in_current_round"`
 	NotFound         []uuid.UUID `json:"not_found"`
 }
+
+type TeamRanking struct {
+	TeamID   uuid.UUID `json:"team_id"`
+	TeamName string    `json:"team_name"`
+	Total    int       `json:"total_score"`
+	Rank     int       `json:"rank"`
+}

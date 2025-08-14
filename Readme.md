@@ -98,10 +98,63 @@
 ---
 
 ### **4. Get Round Rankings**
+
 **Endpoint:** `GET /api/v1/round/:rno`  
 **Description:** Retrieve rankings for a specific round.  
 
 ---
+
+### **5. Round Promotion**
+**Endpoint:** `POST /api/v1/round/:rno/promote`  
+**Description:** Retrieve rankings for a specific round. 
+
+**Request Body:**
+```json
+{
+  "team_ids": [
+    "a145bae2-7933-11f0-80ce-f278fa837760",
+    "a86d7b48-7933-11f0-80ce-f278fa837760"
+  ]
+}
+```
+
+---
+
+## Review Routes
+(Only permissible by reviewers or admins)
+
+### **1. Post Review**
+**Endpoint:** `POST /api/reviews/post/:rno/:team_id`  
+**Description:** Post a new review.  
+
+**Request Body:**
+```json
+{
+  "design": 10,
+  "implementation": 9,
+  "uniqueness": 8,
+  "practicality": 9,
+  "comments": "Very impressive work with excellent implementation quality."
+}
+
+```
+
+---
+
+### **2. Delete Review**
+**Endpoint:** `POST /api/reviews/:rno/:team_id`  
+**Description:** Delete a review.  
+
+---
+
+### **2. Get All Review**
+**Endpoint:** `GET /api/reviews/all`  
+**Description:** Display all reviews.
+
+
+
+
+
 
 **Pro Tips for Usage**  
 - Authentication tokens (if implemented) should be sent via the `Authorization` header with `Bearer <token>` format. 

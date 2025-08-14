@@ -15,13 +15,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type TeamRanking struct {
-	TeamID   uuid.UUID `json:"team_id"`
-	TeamName string    `json:"team_name"`
-	Total    int       `json:"total_score"`
-	Rank     int       `json:"rank"`
-}
-
 func CreateRound(c *fiber.Ctx) error {
 	var round models.Round
 	if err := c.BodyParser(&round); err != nil {
@@ -130,68 +123,69 @@ func UpdateRound(c *fiber.Ctx) error {
 func GetRoundTeamRankings(c *fiber.Ctx) error {
 	rnoStr := c.Params("rno")
 	rno, err := strconv.Atoi(rnoStr)
-	if err != nil {
+	if err != nil || rno < 1 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
 
+	db := initializer.Database.Db
+
 	var round models.Round
-	if err := initializer.Database.Db.Where("round_number = ?", rno).First(&round).Error; err != nil {
+	if err := db.Where("round_number = ?", rno).First(&round).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
 	}
 
 	type row struct {
-		TeamID   uuid.UUID
-		TeamName string
-		Total    *int
+		TeamID   uuid.UUID `gorm:"column:team_id"`
+		TeamName string    `gorm:"column:team_name"`
+		Total    int       `gorm:"column:total"`
 	}
 
 	var rows []row
+
+	// Sum directly from scores (design, implementation, uniqueness, practicality)
+	// and exclude soft-deleted rows if you use gorm.DeletedAt on those tables.
 	const q = `
 SELECT
   t.id   AS team_id,
   t.name AS team_name,
-  COALESCE(SUM(sd.design + sd.implementation + sd.uniqueness + sd.practicality), 0) AS total
+  COALESCE(SUM(s.design + s.implementation + s.uniqueness + s.practicality), 0) AS total
 FROM teams t
-JOIN round_teams rt ON rt.team_id = t.id AND rt.round_id = $1
-LEFT JOIN reviews r ON r.team_id = t.id AND r.round_id = $1
-LEFT JOIN scores s ON s.review_id = r.id
-LEFT JOIN score_details sd ON sd.score_id = s.id
+JOIN round_teams rt
+  ON rt.team_id = t.id
+ AND rt.round_id = $1
+LEFT JOIN reviews r
+  ON r.team_id = t.id
+ AND r.round_id = $1
+ AND r.deleted_at IS NULL
+LEFT JOIN scores s
+  ON s.review_id = r.id
+ AND s.deleted_at IS NULL
+WHERE t.deleted_at IS NULL
 GROUP BY t.id, t.name
 `
-	if err := initializer.Database.Db.Raw(q, round.ID).Scan(&rows).Error; err != nil {
+	if err := db.Raw(q, round.ID).Scan(&rows).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch team rankings"})
 	}
 
+	// Sort by total desc, then name asc (stable for deterministic ties)
 	sort.SliceStable(rows, func(i, j int) bool {
-		ti, tj := 0, 0
-		if rows[i].Total != nil {
-			ti = *rows[i].Total
-		}
-		if rows[j].Total != nil {
-			tj = *rows[j].Total
-		}
-		if ti == tj {
+		if rows[i].Total == rows[j].Total {
 			return rows[i].TeamName < rows[j].TeamName
 		}
-		return ti > tj
+		return rows[i].Total > rows[j].Total
 	})
-
-	rankings := make([]TeamRanking, len(rows))
-	var prevScore *int
+	rankings := make([]helpers.TeamRanking, len(rows))
+	prevScore := -1
 	prevRank := 0
 	for i, r := range rows {
-		score := 0
-		if r.Total != nil {
-			score = *r.Total
-		}
-		if prevScore == nil || score != *prevScore {
+		if i == 0 || r.Total != prevScore {
 			prevRank = i + 1
-			prevScore = &score
+			prevScore = r.Total
 		}
-		rankings[i] = TeamRanking{
+		rankings[i] = helpers.TeamRanking{
 			TeamID:   r.TeamID,
 			TeamName: r.TeamName,
-			Total:    score,
+			Total:    r.Total,
 			Rank:     prevRank,
 		}
 	}
@@ -202,7 +196,6 @@ GROUP BY t.id, t.name
 		"team_count":   len(rankings),
 		"rankings":     rankings,
 	})
-
 }
 
 func PromoteToRound(c *fiber.Ctx) error {

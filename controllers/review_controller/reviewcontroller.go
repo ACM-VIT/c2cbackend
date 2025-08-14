@@ -22,6 +22,7 @@ func PostReview(c *fiber.Ctx) error {
 	if err != nil || rno < 1 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
+
 	teamID, err := uuid.Parse(c.Params("team_id"))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
@@ -37,17 +38,26 @@ func PostReview(c *fiber.Ctx) error {
 	var review models.Review
 	var score models.Score
 
-	err = db.Transaction(func(tx *gorm.DB) error {
+	if txErr := db.Transaction(func(tx *gorm.DB) error {
+		// round
 		var round models.Round
 		if err := tx.Where("round_number = ?", rno).First(&round).Error; err != nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return helpers.ErrRoundNotFound
+			}
+			return err
 		}
 
+		// team
 		var team models.Team
-		if err := tx.Where("id = ?", teamID).First(&team).Error; err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
+		if err := tx.First(&team, "id = ?", teamID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return helpers.ErrTeamNotFound
+			}
+			return err
 		}
 
+		// team must be in the round
 		var cnt int64
 		if err := tx.Table("round_teams").
 			Where("round_id = ? AND team_id = ?", round.ID, team.ID).
@@ -55,9 +65,10 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 		if cnt == 0 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "team not in this round"})
+			return helpers.ErrTeamNotInRound
 		}
 
+		// user must not have already reviewed this team in this round
 		var exists int64
 		if err := tx.Model(&models.Review{}).
 			Where("reviewed_by_id = ? AND team_id = ? AND round_id = ?", user.ID, team.ID, round.ID).
@@ -65,9 +76,10 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 		if exists > 0 {
-			return fiber.ErrConflict
+			return helpers.ErrDuplicateReview
 		}
 
+		// create review
 		review = models.Review{
 			ReviewedByID: user.ID,
 			TeamID:       team.ID,
@@ -77,13 +89,7 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 
-		score = models.Score{
-			ReviewID: review.ID,
-		}
-		if err := tx.Create(&score).Error; err != nil {
-			return err
-		}
-
+		// create score with fields (single row)
 		score = models.Score{
 			ReviewID:       review.ID,
 			Design:         body.Design,
@@ -97,15 +103,15 @@ func PostReview(c *fiber.Ctx) error {
 		}
 
 		return nil
-	})
-
-	if err != nil {
-		switch err {
-		case fiber.ErrNotFound:
+	}); txErr != nil {
+		switch {
+		case errors.Is(txErr, helpers.ErrRoundNotFound):
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
-		case fiber.ErrBadRequest:
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "team not in this round or invalid"})
-		case fiber.ErrConflict:
+		case errors.Is(txErr, helpers.ErrTeamNotFound):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
+		case errors.Is(txErr, helpers.ErrTeamNotInRound):
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "team not in this round"})
+		case errors.Is(txErr, helpers.ErrDuplicateReview):
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "you already reviewed this team for this round"})
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create review"})
@@ -129,45 +135,71 @@ func PostReview(c *fiber.Ctx) error {
 }
 
 func DeleteReview(c *fiber.Ctx) error {
-	user := c.Locals("user").(models.User)
+	user, ok := c.Locals("user").(models.User)
+	if !ok || user.ID == uuid.Nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 	if user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can delete reviews"})
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can delete reviews"})
 	}
 
-	reviewID, err := uuid.Parse(c.Params("id"))
+	// Parse round number
+	rno, err := strconv.Atoi(c.Params("rno"))
+	if err != nil || rno < 1 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
+	}
+
+	// Parse team UUID
+	teamID, err := uuid.Parse(c.Params("team_id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid review id"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
 	}
 
 	db := initializer.Database.Db
 
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		var review models.Review
-		if err := tx.Where("id = ?", reviewID).First(&review).Error; err != nil {
+	txErr := db.Transaction(func(tx *gorm.DB) error {
+		// Find the round by round_number
+		var round models.Round
+		if err := tx.Where("round_number = ?", rno).First(&round).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Review not found"})
+				return fiber.NewError(fiber.StatusNotFound, "round not found")
 			}
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load review"})
+			return err
 		}
 
-		// Delete all Scores for this review (ScoreDetail has OnDelete:CASCADE to Score)
+		// Find the review for that round and team
+		var review models.Review
+		if err := tx.Where("round_id = ? AND team_id = ?", round.ID, teamID).First(&review).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fiber.NewError(fiber.StatusNotFound, "review not found")
+			}
+			return err
+		}
+
+		// Delete scores (optional if ON DELETE CASCADE is set on FK)
 		if err := tx.Where("review_id = ?", review.ID).Delete(&models.Score{}).Error; err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete linked scores"})
+			return err
 		}
 
-		// Finally delete the review
+		// Delete the review
 		if err := tx.Delete(&review).Error; err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete review"})
+			return err
 		}
+
 		return nil
-	}); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete review"})
+	})
+
+	if txErr != nil {
+		var ferr *fiber.Error
+		if errors.As(txErr, &ferr) {
+			return c.Status(ferr.Code).JSON(fiber.Map{"error": ferr.Message})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete review"})
 	}
 
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Review deleted successfully"})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "review deleted successfully"})
 }
 
-// YE NAHI CHAL RAHA LIKHNE ME AALAS PLEASE WILL DO LATER
 func GetReviews(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok || user.ID == uuid.Nil {
@@ -178,7 +210,6 @@ func GetReviews(c *fiber.Ctx) error {
 	}
 
 	var reviews []models.Review
-
 	if err := initializer.Database.Db.
 		Preload("ReviewedBy").
 		Preload("Team").
