@@ -206,46 +206,45 @@ GROUP BY t.id, t.name
 }
 
 func PromoteToRound(c *fiber.Ctx) error {
-	user := c.Locals("user").(models.User)
+	user, ok := c.Locals("user").(models.User)
+	if !ok || user.ID == uuid.Nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 	if user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Only admins can promote teams to the next round",
-		})
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can promote teams to the next round"})
 	}
 
-	rno := c.Params("rno")
-	roundNumber, err := strconv.Atoi(rno)
-	if err != nil || roundNumber < 1 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid round number",
-		})
+	// rno represents the NEXT round number you want to promote into
+	roundNumber, err := strconv.Atoi(c.Params("rno"))
+	if err != nil || roundNumber < 2 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
 
 	var body helpers.PromoteReq
 	if err := c.BodyParser(&body); err != nil || len(body.TeamIDs) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Provide non-empty team_ids array",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "provide non-empty team_ids array"})
 	}
 
 	db := initializer.Database.Db
 
 	resp := helpers.PromoteResponse{
-		CurrentRoundNo: roundNumber,
-		NextRoundNo:    roundNumber + 1,
+		CurrentRoundNo: roundNumber - 1,
+		NextRoundNo:    roundNumber,
 	}
 
 	err = db.Transaction(func(tx *gorm.DB) error {
 		var current models.Round
-		if err := tx.Where("round_number = ?", roundNumber).First(&current).Error; err != nil {
-			return fiber.ErrNotFound
+		if err := tx.Where("round_number = ?", resp.CurrentRoundNo).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fiber.ErrNotFound
+			}
+			return err
 		}
 		resp.CurrentRoundID = current.ID
 
 		var next models.Round
-		err := tx.Where("round_number = ?", resp.NextRoundNo).First(&next).Error
-		if err != nil {
-			if err == gorm.ErrRecordNotFound {
+		if err := tx.Where("round_number = ?", resp.NextRoundNo).First(&next).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				next = models.Round{
 					Name:        fmt.Sprintf("Round %d", resp.NextRoundNo),
 					RoundNumber: resp.NextRoundNo,
@@ -260,18 +259,15 @@ func PromoteToRound(c *fiber.Ctx) error {
 		}
 		resp.NextRoundID = next.ID
 
-		var existingTeams []struct {
-			ID uuid.UUID
-		}
-		if err := tx.Table("teams").
-			Select("id").
+		var existingTeams []uuid.UUID
+		if err := tx.Model(&models.Team{}).
 			Where("id IN ?", body.TeamIDs).
-			Scan(&existingTeams).Error; err != nil {
+			Pluck("id", &existingTeams).Error; err != nil {
 			return err
 		}
 		exists := make(map[uuid.UUID]struct{}, len(existingTeams))
-		for _, t := range existingTeams {
-			exists[t.ID] = struct{}{}
+		for _, id := range existingTeams {
+			exists[id] = struct{}{}
 		}
 		for _, id := range body.TeamIDs {
 			if _, ok := exists[id]; !ok {
@@ -279,9 +275,19 @@ func PromoteToRound(c *fiber.Ctx) error {
 			}
 		}
 
+		candidateIDs := make([]uuid.UUID, 0, len(body.TeamIDs))
+		for _, id := range body.TeamIDs {
+			if _, ok := exists[id]; ok {
+				candidateIDs = append(candidateIDs, id)
+			}
+		}
+		if len(candidateIDs) == 0 {
+			return nil
+		}
+
 		var inCurrent []uuid.UUID
 		if err := tx.Table("round_teams").
-			Where("round_id = ? AND team_id IN ?", current.ID, body.TeamIDs).
+			Where("round_id = ? AND team_id IN ?", current.ID, candidateIDs).
 			Pluck("team_id", &inCurrent).Error; err != nil {
 			return err
 		}
@@ -289,16 +295,42 @@ func PromoteToRound(c *fiber.Ctx) error {
 		for _, id := range inCurrent {
 			inCurrentSet[id] = struct{}{}
 		}
-		for _, id := range body.TeamIDs {
-			if _, ok := exists[id]; ok {
-				if _, ok2 := inCurrentSet[id]; !ok2 {
-					resp.NotInCurrent = append(resp.NotInCurrent, id)
-				}
+		for _, id := range candidateIDs {
+			if _, ok := inCurrentSet[id]; !ok {
+				resp.NotInCurrent = append(resp.NotInCurrent, id)
 			}
 		}
 
 		if len(inCurrent) == 0 {
 			return nil
+		}
+
+		// block promotion if any team is already in a HIGHER round than target
+		type maxRow struct {
+			TeamID    uuid.UUID
+			MaxNumber int
+		}
+		var maxRounds []maxRow
+		if err := tx.
+			Table("round_teams AS rt").
+			Select("rt.team_id, MAX(r.round_number) AS max_number").
+			Joins("JOIN rounds r ON r.id = rt.round_id").
+			Where("rt.team_id IN ?", inCurrent).
+			Group("rt.team_id").
+			Scan(&maxRounds).Error; err != nil {
+			return err
+		}
+		alreadyHigher := make([]uuid.UUID, 0)
+		for _, row := range maxRounds {
+			if row.MaxNumber > resp.NextRoundNo {
+				alreadyHigher = append(alreadyHigher, row.TeamID)
+			}
+		}
+		if len(alreadyHigher) > 0 {
+			return &fiber.Error{
+				Code:    fiber.StatusConflict,
+				Message: "one or more teams are already in a higher round than the target",
+			}
 		}
 
 		var already []uuid.UUID
@@ -316,13 +348,14 @@ func PromoteToRound(c *fiber.Ctx) error {
 			RoundID uuid.UUID `gorm:"column:round_id"`
 			TeamID  uuid.UUID `gorm:"column:team_id"`
 		}
-		var rows []rt
+		rows := make([]rt, 0, len(inCurrent))
 		for _, id := range inCurrent {
 			if _, ok := alreadySet[id]; ok {
 				continue
 			}
 			rows = append(rows, rt{RoundID: next.ID, TeamID: id})
 		}
+
 		if len(rows) > 0 {
 			if err := tx.Table("round_teams").
 				Clauses(clause.OnConflict{DoNothing: true}).
@@ -342,16 +375,20 @@ func PromoteToRound(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		if err == fiber.ErrNotFound {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Round not found"})
+		var ferr *fiber.Error
+		if errors.Is(err, fiber.ErrNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
+		} else if errors.As(err, &ferr) && ferr.Code == fiber.StatusConflict {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "one or more teams are already in a higher round than the target",
+			})
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to promote teams"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to promote teams"})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 
-// UNTESTED VIBE CODED FUNCTION
 func AssignAllToRound(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok || user.ID == uuid.Nil {
