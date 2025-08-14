@@ -354,70 +354,63 @@ func PromoteToRound(c *fiber.Ctx) error {
 // UNTESTED VIBE CODED FUNCTION
 func AssignAllToRound(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
-	if !ok || user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Only admins can assign teams to rounds",
-		})
+	if !ok || user.ID == uuid.Nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	if user.Role != models.RoleAdmin {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can assign teams to rounds"})
 	}
 
 	roundNumber, err := strconv.Atoi(c.Params("rno"))
 	if err != nil || roundNumber < 1 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid round number",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
 
 	db := initializer.Database.Db
 
-	tx := db.Begin()
-	if tx.Error != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to start transaction",
-		})
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
 	var round models.Round
-	if err := tx.Where("round_number = ?", roundNumber).First(&round).Error; err != nil {
-		tx.Rollback()
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-				"error": "Round not found",
-			})
+	var assigned int64
+
+	txErr := db.Transaction(func(tx *gorm.DB) error {
+		// 1) Load the round
+		if err := tx.Where("round_number = ?", roundNumber).First(&round).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fiber.ErrNotFound
+			}
+			return err
 		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to fetch round",
-		})
-	}
 
-	var teams []models.Team
-	if err := tx.Select("id").Find(&teams).Error; err != nil {
-		tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to fetch teams",
-		})
-	}
+		// 2) Clear existing links for this round
+		if err := tx.Exec(`DELETE FROM round_teams WHERE round_id = ?`, round.ID).Error; err != nil {
+			return err
+		}
 
-	if err := tx.Model(&round).Association("Teams").Replace(&teams); err != nil {
-		tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to assign teams to round",
-		})
-	}
+		// 3) Insert links for ALL current (non–soft-deleted) teams in one shot
+		//    Adjust the deleted_at filter if you don't use gorm.DeletedAt
+		res := tx.Exec(`
+			INSERT INTO round_teams (round_id, team_id)
+			SELECT ?, t.id
+			FROM teams t
+			WHERE t.deleted_at IS NULL
+		`, round.ID)
+		if res.Error != nil {
+			return res.Error
+		}
+		assigned = res.RowsAffected // Postgres returns the inserted row count here
+		return nil
+	})
 
-	if err := tx.Commit().Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to commit transaction",
-		})
+	if txErr != nil {
+		if errors.Is(txErr, fiber.ErrNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "round not found"})
+		}
+		// If you STILL see the FK error here, verify your join table column names and FKs.
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to assign teams to round"})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"round_id":     round.ID,
 		"round_number": roundNumber,
-		"assigned":     len(teams),
+		"assigned":     assigned,
 	})
 }

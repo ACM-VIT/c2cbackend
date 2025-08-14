@@ -8,7 +8,7 @@ import (
 
 func SetUp(r fiber.Router) {
 	round := r.Group("/round")
-	round.Post("/", roundcontroller.CreateRound)
+	round.Post("/create", roundcontroller.CreateRound)
 	round.Delete("/:rno", roundcontroller.DeleteRound)
 	round.Put("/:rno", roundcontroller.UpdateRound)
 	round.Get("/rankings/:rno", roundcontroller.GetRoundTeamRankings)

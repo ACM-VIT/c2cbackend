@@ -36,7 +36,6 @@ func PostReview(c *fiber.Ctx) error {
 
 	var review models.Review
 	var score models.Score
-	var detail models.ScoreDetail
 
 	err = db.Transaction(func(tx *gorm.DB) error {
 		var round models.Round
@@ -85,15 +84,15 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 
-		detail = models.ScoreDetail{
-			ScoreID:        score.ID,
+		score = models.Score{
+			ReviewID:       review.ID,
 			Design:         body.Design,
 			Implementation: body.Implementation,
 			Uniqueness:     body.Uniqueness,
 			Practicality:   body.Practicality,
 			Comments:       body.Comments,
 		}
-		if err := tx.Create(&detail).Error; err != nil {
+		if err := tx.Create(&score).Error; err != nil {
 			return err
 		}
 
@@ -120,11 +119,11 @@ func PostReview(c *fiber.Ctx) error {
 		"team_id":        review.TeamID,
 		"reviewed_by_id": review.ReviewedByID,
 		"detail": fiber.Map{
-			"design":         detail.Design,
-			"implementation": detail.Implementation,
-			"uniqueness":     detail.Uniqueness,
-			"practicality":   detail.Practicality,
-			"comments":       detail.Comments,
+			"design":         score.Design,
+			"implementation": score.Implementation,
+			"uniqueness":     score.Uniqueness,
+			"practicality":   score.Practicality,
+			"comments":       score.Comments,
 		},
 	})
 }
@@ -170,16 +169,24 @@ func DeleteReview(c *fiber.Ctx) error {
 
 // YE NAHI CHAL RAHA LIKHNE ME AALAS PLEASE WILL DO LATER
 func GetReviews(c *fiber.Ctx) error {
-	user := c.Locals("user").(models.User)
-
+	user, ok := c.Locals("user").(models.User)
+	if !ok || user.ID == uuid.Nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
 	if user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can view reviews"})
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can view reviews"})
 	}
 
 	var reviews []models.Review
-	if err := initializer.Database.Db.Find(&reviews).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve reviews"})
+
+	if err := initializer.Database.Db.
+		Preload("ReviewedBy").
+		Preload("Team").
+		Preload("Round").
+		Preload("Scores").
+		Find(&reviews).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to retrieve reviews"})
 	}
 
-	return c.Status(200).JSON(reviews)
+	return c.Status(fiber.StatusOK).JSON(reviews)
 }
