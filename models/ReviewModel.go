@@ -10,4 +10,5 @@ type Review struct {
 	Team         Team      `gorm:"foreignKey:TeamID" json:"team"`
 	RoundID      uuid.UUID `gorm:"type:uuid;not null" json:"round_id" valid:"required~Round ID is required"`
 	Round        Round     `gorm:"foreignKey:RoundID" json:"round"`
+	Scores       []Score   `gorm:"foreignKey:ReviewID" json:"scores"`
 }

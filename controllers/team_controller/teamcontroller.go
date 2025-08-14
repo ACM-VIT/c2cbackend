@@ -15,7 +15,7 @@ import (
 func CreateTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
-	if user.TeamID != "" {
+	if user.TeamID != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
@@ -74,7 +74,7 @@ func CreateTeam(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
-	if freshUser.TeamID != "" {
+	if freshUser.TeamID != nil {
 		tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
@@ -156,7 +156,7 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
-	if freshUser.TeamID != "" {
+	if freshUser.TeamID != nil {
 		tx.Rollback()
 		return c.Status(400).JSON(fiber.Map{"error": "User is already in a team"})
 	}
@@ -229,7 +229,7 @@ func LeaveTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
 	}
 
-	if freshUser.TeamID == "" {
+	if freshUser.TeamID == nil {
 		tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
 	}
