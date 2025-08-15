@@ -71,7 +71,7 @@
   "name": "Round 1",
   "round_number": 1,
   "description": "Initial qualifying round"
-}
+} 
 ```
 
 ---
@@ -142,7 +142,7 @@
 ---
 
 ### **2. Delete Review**
-**Endpoint:** `POST /api/reviews/:rno/:team_id`  
+**Endpoint:** `DELETE /api/reviews/:rno/:team_id`  
 **Description:** Delete a review.  
 
 ---
