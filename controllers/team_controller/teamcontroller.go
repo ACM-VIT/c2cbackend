@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -15,21 +16,27 @@ import (
 func CreateTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
+	// User must not already be in a team
 	if user.TeamID != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	type CreateTeamInput struct {
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
+		Name        string    `json:"name"`
+		Description *string   `json:"description"`
+		TrackID     uuid.UUID `json:"track_id"`
 	}
 	var input CreateTeamInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
+
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team name is required"})
+	}
+	if input.TrackID == uuid.Nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "track_id is required"})
 	}
 
 	db := initializer.Database.Db
@@ -43,15 +50,28 @@ func CreateTeam(c *fiber.Ctx) error {
 		}
 	}()
 
+	var track models.Track
+	if err := tx.
+		Clauses(clause.Locking{Strength: "SHARE"}).
+		Where("id = ?", input.TrackID).
+		First(&track).Error; err != nil {
+		tx.Rollback()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Track not found"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load track"})
+	}
+
 	var team models.Team
 	const maxRetries = 3
 	var createErr error
-	for i := 0; i < maxRetries; i++ {
+	for range maxRetries {
 		code := helpers.GenerateTeamCode()
 		team = models.Team{
 			Name:        input.Name,
 			Description: input.Description,
 			Code:        code,
+			TrackID:     input.TrackID,
 		}
 		createErr = tx.Create(&team).Error
 		if createErr == nil {
@@ -95,7 +115,7 @@ func CreateTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize team creation"})
 	}
 
-	if err := db.Preload("Users").First(&team, "id = ?", team.ID).Error; err == nil {
+	if err := db.Preload("Users").Preload("Track").First(&team, "id = ?", team.ID).Error; err == nil {
 		return c.JSON(fiber.Map{
 			"message": "Team created successfully",
 			"team":    team,
@@ -158,7 +178,7 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 	}
 	if freshUser.TeamID != nil {
 		tx.Rollback()
-		return c.Status(400).JSON(fiber.Map{"error": "User is already in a team"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
 	}
 
 	var memberCount int64
@@ -173,7 +193,6 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team is full"})
 	}
 
-	// Join the team (with guard)
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id IS NULL", freshUser.ID).
 		Update("team_id", team.ID)
@@ -190,15 +209,13 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to join team"})
 	}
 
-	// Load users for the response
-	if err := db.Preload("Users").First(&team, "id = ?", team.ID).Error; err == nil {
+	if err := db.Preload("Users").Preload("Track").First(&team, "id = ?", team.ID).Error; err == nil {
 		return c.JSON(fiber.Map{
 			"message": "Successfully joined team",
 			"team":    team,
 		})
 	}
 
-	// Fallback if preload fails
 	return c.JSON(fiber.Map{
 		"message": "Successfully joined team",
 		"team":    team,
@@ -219,7 +236,6 @@ func LeaveTeam(c *fiber.Ctx) error {
 		}
 	}()
 
-	// Re-load and lock the user (state may have changed since middleware ran)
 	var freshUser models.User
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -234,7 +250,7 @@ func LeaveTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
 	}
 
-	oldTeamID := freshUser.TeamID
+	oldTeamID := *freshUser.TeamID
 
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id = ?", freshUser.ID, oldTeamID).
