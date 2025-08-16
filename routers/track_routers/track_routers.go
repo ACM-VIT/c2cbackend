@@ -7,8 +7,9 @@ import (
 )
 
 func Setup(r fiber.Router) {
-	r.Post("/tracks", trackcontroller.CreateTrack)
-	r.Get("/tracks", trackcontroller.GetTracks)
-	r.Put("/tracks/:trackid", trackcontroller.UpdateTrack)
-	r.Delete("/tracks/:trackid", trackcontroller.DeleteTrack)
+	track := r.Group("/tracks")
+	track.Post("/create", trackcontroller.CreateTrack)
+	track.Get("/getall", trackcontroller.GetTracks)
+	track.Put("/update/:trackid", trackcontroller.UpdateTrack)
+	track.Delete("/delete/:trackid", trackcontroller.DeleteTrack)
 }

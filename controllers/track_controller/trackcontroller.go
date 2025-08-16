@@ -122,5 +122,5 @@ func DeleteTrack(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete track"})
 	}
 
-	return c.SendStatus(fiber.StatusNoContent)
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Track deleted successfully"})
 }
