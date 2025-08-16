@@ -5,6 +5,8 @@ import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -143,7 +145,10 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team code is required"})
 	}
 
-	const maxTeamSize int64 = 2
+	maxTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MAX_SIZE"), 10, 64)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Invalid team max size"})
+	}
 	db := initializer.Database.Db
 
 	tx := db.Begin()

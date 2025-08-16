@@ -142,7 +142,7 @@
 ---
 
 ### **2. Delete Review**
-**Endpoint:** `POST /api/reviews/:rno/:team_id`  
+**Endpoint:** `DELETE /api/reviews/:rno/:team_id`  
 **Description:** Delete a review.  
 
 ---
