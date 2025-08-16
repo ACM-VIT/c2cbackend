@@ -33,10 +33,11 @@
 ```json
 {
   "name": "Hackathon Avengers",
-  "description": "A group of developers aiming to win the hackathon."
+  "description": "A group of developers aiming to win the hackathon.",
+  "track_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
-> **Note:** `description` is optional.
+> **Note:** `description` is optional, but `track_id` is required.
 
 ---
 
@@ -59,7 +60,49 @@
 
 ---
 
-##  Round Routes *(Admin Only)*
+## Track Routes *(Admin Only)*
+
+### **1. Create Track**
+**Endpoint:** `POST /api/v1/tracks/create`  
+**Description:** Create a new track.  
+
+**Request Body:**
+```json
+{
+  "title": "AI/ML",
+  "description": "Projects related to Artificial Intelligence and Machine Learning"
+}
+```
+
+---
+
+### **2. Get Tracks**
+**Endpoint:** `GET /api/v1/tracks/getall`  
+**Description:** Retrieve all available tracks.  
+
+---
+
+### **3. Update Track**
+**Endpoint:** `PUT /api/v1/tracks/update/:trackid`  
+**Description:** Update an existing track.  
+
+**Request Body (any field is optional):**
+```json
+{
+  "title": "AI & Machine Learning",
+  "description": "Updated description for AI/ML track"
+}
+```
+
+---
+
+### **4. Delete Track**
+**Endpoint:** `DELETE /api/v1/tracks/delete/:trackid`  
+**Description:** Delete a specific track.  
+
+---
+
+## Round Routes *(Admin Only)*
 
 ### **1. Create Round**
 **Endpoint:** `POST /api/v1/round`  
@@ -98,7 +141,6 @@
 ---
 
 ### **4. Get Round Rankings**
-
 **Endpoint:** `GET /api/v1/round/:rno`  
 **Description:** Retrieve rankings for a specific round.  
 
@@ -106,7 +148,7 @@
 
 ### **5. Round Promotion**
 **Endpoint:** `POST /api/v1/round/:rno/promote`  
-**Description:** Retrieve rankings for a specific round. 
+**Description:** Promote specific teams to the next round.  
 
 **Request Body:**
 ```json
@@ -120,11 +162,10 @@
 
 ---
 
-## Review Routes
-(Only permissible by reviewers or admins)
+## Review Routes *(Reviewers & Admins Only)*
 
 ### **1. Post Review**
-**Endpoint:** `POST /api/reviews/post/:rno/:team_id`  
+**Endpoint:** `POST /api/v1/reviews/post/:rno/:team_id`  
 **Description:** Post a new review.  
 
 **Request Body:**
@@ -136,25 +177,21 @@
   "practicality": 9,
   "comments": "Very impressive work with excellent implementation quality."
 }
-
 ```
 
 ---
 
 ### **2. Delete Review**
-**Endpoint:** `DELETE /api/reviews/:rno/:team_id`  
+**Endpoint:** `DELETE /api/v1/reviews/:rno/:team_id`  
 **Description:** Delete a review.  
 
 ---
 
-### **2. Get All Review**
-**Endpoint:** `GET /api/reviews/all`  
-**Description:** Display all reviews.
+### **3. Get All Reviews**
+**Endpoint:** `GET /api/v1/reviews/all`  
+**Description:** Display all reviews.  
 
+---
 
-
-
-
-
-**Pro Tips for Usage**  
-- Authentication tokens (if implemented) should be sent via the `Authorization` header with `Bearer <token>` format. 
+## Pro Tips for Usage
+- Authentication tokens (if implemented) should be sent via the `Authorization` header with `Bearer <token>` format.
