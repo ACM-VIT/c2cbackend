@@ -31,6 +31,7 @@
 **Endpoint:** `GET /api/v1/auth/user`
 **Description:** Get user info.  
 
+---
 
 
 ## Team Routes
