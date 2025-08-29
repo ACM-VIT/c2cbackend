@@ -3,15 +3,15 @@ package usercontroller
 import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
+	"errors"
 	"net/http"
-	"os"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
-var internalCollegeName = os.Getenv("INTERNAL_COLLEGE_NAME")
+const internalCollegeName = "VIT University"
 
 func SignUp(c *fiber.Ctx) error {
 	rawClaims := c.Locals("claims")
@@ -45,7 +45,7 @@ func SignUp(c *fiber.Ctx) error {
 		RegNo         string          `json:"reg_no"`
 		Role          models.UserRole `json:"role"`
 		Internal      bool            `json:"internal"`
-		CollegeName   string          `json:"college_name"` // ignored when Internal == true
+		CollegeName   string          `json:"college_name"`
 	}
 	var req body
 	if err := c.BodyParser(&req); err != nil {
@@ -55,18 +55,32 @@ func SignUp(c *fiber.Ctx) error {
 		})
 	}
 
+	if !govalidator.Matches(req.ContactNumber, "^[6-9][0-9]{9}$") {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid mobile number. Must be 10 digits and start with 6-9."})
+	}
+
+	if req.Internal && req.RegNo == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "Registration number is required for internal users",
+		})
+	}
+
+	if !req.Internal && req.CollegeName == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "College name is required for external users",
+		})
+	}
+
 	role := req.Role
 	if !models.IsValidRole(role) {
 		role = models.RoleParticipant
 	}
 
-	// If the user already exists, upsert missing profile bits and (optionally) internal/college.
 	var existing models.User
 	err := initializer.Database.Db.Preload("Team").Where("email = ?", email).First(&existing).Error
 	if err == nil {
 		toSave := false
 
-		// Update missing basic profile fields from claims
 		if existing.Name == "" && name != "" {
 			existing.Name = name
 			toSave = true
@@ -75,20 +89,17 @@ func SignUp(c *fiber.Ctx) error {
 			existing.ProfilePictureURL = picture
 			toSave = true
 		}
-		if req.Internal && (!existing.Internal || existing.CollegeName != internalCollegeName) {
+		if req.Internal {
 			existing.Internal = true
 			existing.CollegeName = internalCollegeName
 			toSave = true
-		} else if !req.Internal {
-			// Only set college name from request if not internal and a value provided
+		} else {
 			if req.CollegeName != "" && existing.CollegeName == "" {
 				existing.CollegeName = req.CollegeName
 				toSave = true
 			}
-			// Keep existing.Internal as-is if already true (don’t downgrade silently)
 		}
 
-		// Optionally backfill role/other form fields if empty
 		if existing.Role == "" && role != "" {
 			existing.Role = role
 			toSave = true
@@ -120,7 +131,6 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing user"})
 	}
 
-	// New user path
 	college := req.CollegeName
 	if req.Internal {
 		college = internalCollegeName
@@ -209,4 +219,38 @@ func SignIn(c *fiber.Ctx) error {
 		"message": "Signed in",
 		"user":    user,
 	})
+}
+
+func GetUser(c *fiber.Ctx) error {
+	if u := c.Locals("user"); u != nil {
+		if user, ok := u.(models.User); ok {
+			return c.Status(http.StatusOK).JSON(fiber.Map{"user": user})
+		}
+		if userPtr, ok := u.(*models.User); ok && userPtr != nil {
+			return c.Status(http.StatusOK).JSON(fiber.Map{"user": userPtr})
+		}
+	}
+
+	rawClaims := c.Locals("claims")
+	if rawClaims == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Missing auth claims"})
+	}
+	claims, ok := rawClaims.(map[string]interface{})
+	if !ok {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid auth claims"})
+	}
+	email, _ := claims["email"].(string)
+	if email == "" {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Email not present in token claims"})
+	}
+
+	var user models.User
+	if err := initializer.Database.Db.Preload("Team").Where("email = ?", email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch user"})
+	}
+
+	return c.Status(http.StatusOK).JSON(fiber.Map{"user": user})
 }
