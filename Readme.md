@@ -11,8 +11,12 @@
 {
   "contact_number": "1234567890",
   "gender": "female",
-  "reg_no": "REG2025002"
+  "reg_no": "REG2025002",
+  "role": "participant",
+  "internal": true,
+  "college_name": "<only counts if internal is false>"
 }
+
 ```
 
 ---

@@ -269,9 +269,15 @@ func LeaveTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Team membership changed, please retry"})
 	}
 
-	if err := tx.Exec("DELETE FROM team_users WHERE user_id = ? AND team_id = ?", freshUser.ID, oldTeamID).Error; err != nil {
+	del := tx.Exec(`
+		DELETE FROM teams
+		WHERE id = ?
+		  AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
+		  AND NOT EXISTS (SELECT 1 FROM team_users WHERE team_id = ?)
+	`, oldTeamID, oldTeamID, oldTeamID)
+	if del.Error != nil {
 		tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team membership"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete team"})
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -279,8 +285,9 @@ func LeaveTeam(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"message": "Left team successfully",
-		"user_id": freshUser.ID,
-		"team_id": oldTeamID,
+		"message":     "Left team successfully",
+		"user_id":     freshUser.ID,
+		"team_id":     oldTeamID,
+		"teamDeleted": del.RowsAffected > 0,
 	})
 }
