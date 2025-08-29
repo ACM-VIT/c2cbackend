@@ -66,8 +66,7 @@
 ```json
 {
   "name": "Hackathon Avengers",
-  "description": "A group of developers aiming to win the hackathon.",
-  "track_id": "550e8400-e29b-41d4-a716-446655440000"
+  "description": "A group of developers aiming to win the hackathon."
 }
 ```
 > **Note:** `description` is optional, but `track_id` is required.
