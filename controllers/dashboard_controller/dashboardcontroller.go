@@ -69,11 +69,8 @@ func Dashboard(c *fiber.Ctx) error {
 	currentUser := user
 	currentUser.Team = nil
 
-	// "team": lightweight data WITHOUT the embedded Track/Users
 	var teamResp interface{} = nil
-	// "track": {} when TrackID is null/zero, else the track object
 	var trackResp interface{} = fiber.Map{}
-	// "teammates": separate list
 	teammates := []models.User{}
 
 	if user.Team != nil {
@@ -88,10 +85,9 @@ func Dashboard(c *fiber.Ctx) error {
 			"github_url":  user.Team.GithubURL,
 			"figma_url":   user.Team.FigmaURL,
 			"other":       user.Team.Other,
-			"track_id":    user.Team.TrackID, // may be nil/zero
+			"track_id":    user.Team.TrackID,
 		}
 
-		// teammates (exclude current user; strip their Team pointers)
 		for _, u := range user.Team.Users {
 			if u.ID == user.ID {
 				continue
@@ -109,8 +105,8 @@ func Dashboard(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"user":      currentUser,
-		"team":      teamResp,  // never includes a nested "track"
-		"teammates": teammates, // teammates only
-		"track":     trackResp, // {} if track_id is null/zero, else track object
+		"team":      teamResp,
+		"teammates": teammates,
+		"track":     trackResp,
 	})
 }
