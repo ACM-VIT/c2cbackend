@@ -55,9 +55,13 @@ func FirebaseAuth() fiber.Handler {
 		var user models.User
 		if err := initializer.Database.Db.Where("email = ?", email).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return &fiber.Error{Code: 404, Message: "User not found"}
+				return c.Status(http.StatusNotFound).JSON(fiber.Map{
+					"error": "User not found",
+				})
 			}
-			return &fiber.Error{Code: 500, Message: "Failed to retrieve user"}
+			return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to retrieve user",
+			})
 		}
 
 		c.Locals("user", user)

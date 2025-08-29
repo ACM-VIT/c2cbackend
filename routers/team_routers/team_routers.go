@@ -11,4 +11,5 @@ func SetUp(r fiber.Router) {
 	team.Post("/create", teamcontroller.CreateTeam)
 	team.Post("/join", teamcontroller.JoinTeamByCode)
 	team.Get("/leave", teamcontroller.LeaveTeam)
+	team.Post("/submission", teamcontroller.CreateTeamSubmission)
 }
