@@ -10,6 +10,11 @@ import (
 )
 
 func SetupRoutes(app *fiber.App) {
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message": "Hello World!",
+		})
+	})
 
 	if os.Getenv("AUTH_USAGE") == "FIREBASE" {
 		public := app.Group("/api/v1", middleware.FirebaseClaims())
@@ -17,18 +22,14 @@ func SetupRoutes(app *fiber.App) {
 
 		private := app.Group("/api/v1", middleware.FirebaseAuth())
 		routers.Setup(private)
-		private.Get("/", func(c *fiber.Ctx) error {
-			return c.SendString("Hello World!")
-		})
+
 	} else {
 		public := app.Group("/api/v1", middleware.GoogleClaims())
 		routers.PubSet(public)
 
 		private := app.Group("/api/v1", middleware.GoogleAuth())
 		routers.Setup(private)
-		private.Get("/", func(c *fiber.Ctx) error {
-			return c.SendString("Hello World!")
-		})
+
 	}
 }
 
