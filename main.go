@@ -4,6 +4,7 @@ import (
 	"c2cbackend/initializer"
 	"c2cbackend/middleware"
 	"c2cbackend/routers"
+	"log"
 	"os"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,7 +17,7 @@ func SetupRoutes(app *fiber.App) {
 			"message": "Hello World!",
 		})
 	})
-
+	log.Println(os.Getenv("AUTH_USAGE"))
 	if os.Getenv("AUTH_USAGE") == "FIREBASE" {
 		public := app.Group("/api/v1", middleware.FirebaseClaims())
 		routers.PubSet(public)

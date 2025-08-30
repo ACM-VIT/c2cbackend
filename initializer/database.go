@@ -38,7 +38,7 @@ func ConnectToDB() {
 	if os.Getenv("SHOULD_MIGRATE") == "TRUE" {
 		log.Println("Running DB Migrations...")
 
-		err = db.AutoMigrate(&models.User{}, &models.Score{}, &models.Review{}, &models.Team{}, &models.Round{}, &models.Track{})
+		err = db.AutoMigrate(&models.User{}, &models.Score{}, &models.Review{}, &models.Team{}, &models.Round{}, &models.Track{}, &models.SponCode{})
 
 		if err != nil {
 			log.Fatalf("Error running migrations: %v", err)
