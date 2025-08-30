@@ -36,7 +36,15 @@ func initOIDC() error {
 			return
 		}
 
-		defaultAud = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
+    // Preferred server-side env var
+    defaultAud = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
+    // Common fallbacks used in some deployments
+    if defaultAud == "" {
+        defaultAud = strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
+    }
+    if defaultAud == "" {
+        defaultAud = strings.TrimSpace(os.Getenv("NEXT_PUBLIC_GOOGLE_CLIENT_ID"))
+    }
 		allowedAuds = make(map[string]struct{})
 
 		// Prefer an explicit allow-list if provided (supports multiple client IDs).
@@ -50,10 +58,10 @@ func initOIDC() error {
 		}
 
 		// If only single client ID is configured, use that.
-		if len(allowedAuds) == 0 && defaultAud == "" {
-			initErr = errors.New("missing GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_ALLOWED_AUDS")
-			return
-		}
+        if len(allowedAuds) == 0 && defaultAud == "" {
+            initErr = errors.New("missing GOOGLE_OAUTH_CLIENT_ID/GOOGLE_CLIENT_ID (or GOOGLE_OAUTH_ALLOWED_AUDS)")
+            return
+        }
 		if defaultAud != "" {
 			allowedAuds[defaultAud] = struct{}{}
 		}
@@ -109,20 +117,24 @@ func verifyGoogleIDToken(ctx context.Context, raw string) (*oidc.IDToken, map[st
 }
 
 func GoogleClaims() fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Next()
-		}
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
-			return c.Next()
-		}
+    return func(c *fiber.Ctx) error {
+        authHeader := c.Get("Authorization")
+        if authHeader == "" {
+            return c.Next()
+        }
+        parts := strings.SplitN(authHeader, " ", 2)
+        if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" || parts[1] == "" {
+            return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Invalid Authorization header format",
+            })
+        }
 
-		idToken, claims, err := verifyGoogleIDToken(context.Background(), parts[1])
-		if err != nil {
-			return c.Next()
-		}
+        idToken, claims, err := verifyGoogleIDToken(context.Background(), parts[1])
+        if err != nil {
+            return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+                "error": "Invalid or expired token",
+            })
+        }
 
 		if sub, ok := claims["sub"].(string); ok && sub != "" {
 			c.Locals("uid", sub)
