@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"c2cbackend/routers/code_routes"
 	"c2cbackend/routers/dashboard_routes"
 	"c2cbackend/routers/review_routers"
 	"c2cbackend/routers/round_routers"
@@ -16,6 +17,7 @@ func PubSet(r fiber.Router) {
 }
 
 func Setup(r fiber.Router) {
+	code_routes.SetUp(r)
 	track_routers.Setup(r)
 	team_routers.SetUp(r)
 	round_routers.SetUp(r)

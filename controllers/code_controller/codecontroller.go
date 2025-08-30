@@ -1,8 +1,10 @@
 package codecontroller
 
 import (
+	"bufio"
 	"errors"
-	"os"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -15,19 +17,112 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func availableCodes() []string {
-	raw := os.Getenv("SPON_CODES")
-	if strings.TrimSpace(raw) == "" {
-		return []string{"ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO"}
+func SeedCodesFromFile(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(models.User)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if s := strings.TrimSpace(p); s != "" {
-			out = append(out, s)
+
+	if user.Role != "admin" {
+		return fiber.NewError(fiber.StatusForbidden, "forbidden")
+	}
+
+	formFile, err := c.FormFile("file")
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "missing file field 'file'")
+	}
+
+	f, err := formFile.Open()
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "unable to open uploaded file")
+	}
+	defer f.Close()
+
+	db := initializer.Database.Db
+
+	reader := bufio.NewReader(f)
+	seen := make(map[string]struct{})
+	var codes []string
+	var skippedEmpty, skippedInvalid, skippedDupInFile int
+
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return fiber.NewError(fiber.StatusBadRequest, "failed reading uploaded file")
+		}
+		line = strings.TrimSpace(line)
+
+		if line == "" {
+			skippedEmpty++
+		} else {
+			code := strings.TrimSpace(line)
+			code = strings.ToUpper(code)
+
+			if _, dup := seen[code]; dup {
+				skippedDupInFile++
+			} else {
+				seen[code] = struct{}{}
+				codes = append(codes, code)
+			}
+		}
+
+		if errors.Is(readErr, io.EOF) {
+			break
 		}
 	}
-	return out
+
+	if len(codes) == 0 {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message":          "no valid codes to insert",
+			"inserted":         0,
+			"already_present":  0,
+			"skipped_empty":    skippedEmpty,
+			"skipped_invalid":  skippedInvalid,
+			"skipped_dup_file": skippedDupInFile,
+		})
+	}
+
+	type resultCounters struct {
+		inserted       int
+		alreadyPresent int
+	}
+	rc := resultCounters{}
+
+	err = db.Transaction(func(tx *gorm.DB) error {
+		for _, code := range codes {
+			var existing models.SponCode
+			if err := tx.Where("code = ?", code).First(&existing).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+
+					row := models.SponCode{
+						ID:   uuid.New(),
+						Code: code,
+					}
+
+					if err := tx.Create(&row).Error; err != nil {
+						return fmt.Errorf("failed inserting code %s: %w", code, err)
+					}
+					rc.inserted++
+					continue
+				}
+				return fmt.Errorf("failed checking code %s: %w", code, err)
+			}
+			rc.alreadyPresent++
+		}
+		return nil
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message":          "seeding completed",
+		"inserted":         rc.inserted,
+		"already_present":  rc.alreadyPresent,
+		"skipped_empty":    skippedEmpty,
+		"skipped_invalid":  skippedInvalid,
+		"skipped_dup_file": skippedDupInFile,
+	})
 }
 
 func RequestCode(c *fiber.Ctx) error {
@@ -65,37 +160,29 @@ func RequestCode(c *fiber.Ctx) error {
 			return err
 		}
 
-		var usedRows []models.SponCode
-		if err := tx.Select("code").Find(&usedRows).Error; err != nil {
-			return err
-		}
-		used := make(map[string]struct{}, len(usedRows))
-		for _, r := range usedRows {
-			used[r.Code] = struct{}{}
-		}
+		var free models.SponCode
+		q := tx.
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("team_id IS NULL").
+			Order("requested_at NULLS FIRST, created_at ASC, code ASC").
+			First(&free)
 
-		var chosen string
-		for _, cand := range availableCodes() {
-			if _, taken := used[cand]; !taken {
-				chosen = cand
-				break
+		if q.Error != nil {
+			if errors.Is(q.Error, gorm.ErrRecordNotFound) {
+				return fiber.NewError(fiber.StatusConflict, "no codes left to assign")
 			}
-		}
-		if chosen == "" {
-			return fiber.NewError(fiber.StatusConflict, "no codes left to assign")
+			return q.Error
 		}
 
-		row := models.SponCode{
-			ID:          uuid.New(),
-			Code:        chosen,
-			TeamID:      teamID,
-			RequestedAt: time.Now(),
-		}
-		if err := tx.Create(&row).Error; err != nil {
+		now := time.Now()
+		free.TeamID = &teamID
+		free.RequestedAt = now
+
+		if err := tx.Save(&free).Error; err != nil {
 			return err
 		}
 
-		assigned = row
+		assigned = free
 		return nil
 	}); err != nil {
 		return fiber.NewError(fiber.StatusConflict, err.Error())
