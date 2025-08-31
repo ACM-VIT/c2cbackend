@@ -298,7 +298,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create submission"})
 	}
 
-	// Auto-promote: if ScreenFlag is true AND team has any external participant, move to NEXT round
 	promoted := false
 	if currentRound.ScreenFlag {
 		var externalCount int64
@@ -325,18 +324,8 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to promote team to next round"})
 				}
 
-				// 2) remove current link (so the team is actually moved)
-				if err := tx.Exec(`
-					DELETE FROM round_teams
-					WHERE round_id = ? AND team_id = ?
-				`, currentRound.ID, team.ID).Error; err != nil {
-					_ = tx.Rollback()
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to remove team from current round"})
-				}
-
 				promoted = true
 			}
-			// if no next round exists, skip silently
 		}
 	}
 
