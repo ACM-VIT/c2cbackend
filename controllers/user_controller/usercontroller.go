@@ -5,6 +5,8 @@ import (
 	"c2cbackend/models"
 	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/gofiber/fiber/v2"
@@ -12,6 +14,23 @@ import (
 )
 
 const internalCollegeName = "VIT University"
+
+func sanitizeName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// Remove dots
+	s = strings.ReplaceAll(s, ".", " ")
+	re := regexp.MustCompile(`[^a-zA-Z0-9 ]+`)
+	s = re.ReplaceAllString(s, "")
+	// collapse multiple spaces
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 100 {
+		s = s[:100]
+	}
+	return s
+}
 
 func SignUp(c *fiber.Ctx) error {
 	rawClaims := c.Locals("claims")
@@ -82,8 +101,10 @@ func SignUp(c *fiber.Ctx) error {
 		toSave := false
 
 		if existing.Name == "" && name != "" {
-			existing.Name = name
-			toSave = true
+			if sanitized := sanitizeName(name); sanitized != "" {
+				existing.Name = sanitized
+				toSave = true
+			}
 		}
 		if existing.ProfilePictureURL == "" && picture != "" {
 			existing.ProfilePictureURL = picture
@@ -127,7 +148,7 @@ func SignUp(c *fiber.Ctx) error {
 			"user":    existing,
 		})
 	}
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != gorm.ErrRecordNotFound {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing user"})
 	}
 
@@ -136,8 +157,14 @@ func SignUp(c *fiber.Ctx) error {
 		college = internalCollegeName
 	}
 
+	// sanitize name before creating user
+	sanitizedName := sanitizeName(name)
+	if sanitizedName == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid name after sanitization"})
+	}
+
 	user := models.User{
-		Name:              name,
+		Name:              sanitizedName,
 		Email:             email,
 		ProfilePictureURL: picture,
 		ContactNumber:     req.ContactNumber,
