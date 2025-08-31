@@ -247,7 +247,7 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	teamCode := strings.TrimSpace(body.Code)
+	teamCode := strings.ToUpper(strings.TrimSpace(body.Code))
 	if teamCode == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team code is required"})
 	}
