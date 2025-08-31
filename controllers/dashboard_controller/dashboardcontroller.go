@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+//todo: implement checkin flag in rounds and user checkedin field so that the portal can conditionally render check in CTA
 func Dashboard(c *fiber.Ctx) error {
 	// Get the authenticated user
 	var ctxUser models.User

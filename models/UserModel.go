@@ -16,6 +16,7 @@ type User struct {
 	Role              UserRole   `gorm:"type:varchar(20);not null" json:"role" valid:"in(admin|reviewer|participant)~Role must be admin/reviewer/participant"`
 	TeamID            *uuid.UUID `gorm:"type:uuid;" json:"team_id"`
 	Team              *Team      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
+	CheckedIn         bool       `gorm:"default:false" json:"checked_in,omitempty"`
 }
 
 type UserRole string

@@ -13,4 +13,5 @@ type Round struct {
 	Description *string   `gorm:"type:text" json:"description,omitempty"`
 	Teams       []Team    `gorm:"many2many:round_teams;" json:"teams"`
 	Reviews     []Review  `gorm:"foreignKey:RoundID" json:"reviews"`
+	CheckInFlag bool      `gorm:"type:boolean;default:false" json:"check_in_flag,omitempty"`
 }
