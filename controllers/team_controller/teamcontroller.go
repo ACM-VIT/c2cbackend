@@ -550,7 +550,17 @@ func GetTeamSubmission(c *fiber.Ctx) error {
 
     var submission models.Submission
     if err := db.
-        Preload("Team").
+        Preload("Team", func(db *gorm.DB) *gorm.DB {
+            return db.Select([]string{
+                "id", "created_at", "updated_at",
+                "name", "description", "code",
+                "github_url", "figma_url", "other",
+                "github_installation_id", "track_id",
+            })
+        }).
+        Preload("Team.Track", func(db *gorm.DB) *gorm.DB {
+            return db.Select([]string{"id", "created_at", "updated_at", "title", "description"})
+        }).
         Where("team_id = ? AND round_id = ?", team.ID, currentRound.ID).
         First(&submission).Error; err != nil {
         if errors.Is(err, gorm.ErrRecordNotFound) {
