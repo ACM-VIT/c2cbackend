@@ -11,8 +11,12 @@
 {
   "contact_number": "1234567890",
   "gender": "female",
-  "reg_no": "REG2025002"
+  "reg_no": "REG2025002",
+  "role": "participant",
+  "internal": true,
+  "college_name": "<only counts if internal is false>"
 }
+
 ```
 
 ---
@@ -22,6 +26,35 @@
 **Description:** Log in an existing user.  
 
 ---
+
+### **3. Get User**
+**Endpoint:** `GET /api/v1/auth/user`
+**Description:** Get user info.  
+
+---
+
+## RSVP Stuff
+
+### **1. Get Dashboard**
+**Endpoint:** `GET /api/v1/dashboard`  
+**Description:** Get user dahboard.
+
+### **3. Create Submission**
+**Endpoint:** `POST /api/v1/team/submission`  
+**Description:** Create a new team.
+**Request Body:**
+```json
+{
+  "github_url": "https://github.com/example-org/hackathon-project",
+  "figma_url": "https://www.figma.com/file/abcd1234/Project-Design",
+  "other": "https://example.com/demo",
+  "track_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+---
+
+
 
 ## Team Routes
 
@@ -33,8 +66,7 @@
 ```json
 {
   "name": "Hackathon Avengers",
-  "description": "A group of developers aiming to win the hackathon.",
-  "track_id": "550e8400-e29b-41d4-a716-446655440000"
+  "description": "A group of developers aiming to win the hackathon."
 }
 ```
 > **Note:** `description` is optional, but `track_id` is required.

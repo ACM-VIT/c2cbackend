@@ -3,6 +3,7 @@ package usercontroller
 import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
+	"errors"
 	"net/http"
 
 	"github.com/asaskevich/govalidator"
@@ -10,19 +11,17 @@ import (
 	"gorm.io/gorm"
 )
 
+const internalCollegeName = "VIT University"
+
 func SignUp(c *fiber.Ctx) error {
 	rawClaims := c.Locals("claims")
 	if rawClaims == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Missing auth claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Missing auth claims"})
 	}
 
 	claims, ok := rawClaims.(map[string]interface{})
 	if !ok {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid auth claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid auth claims"})
 	}
 
 	email, _ := claims["email"].(string)
@@ -37,9 +36,7 @@ func SignUp(c *fiber.Ctx) error {
 	}
 
 	if email == "" {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Email not present in token claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Email not present in token claims"})
 	}
 
 	type body struct {
@@ -47,6 +44,8 @@ func SignUp(c *fiber.Ctx) error {
 		Gender        string          `json:"gender"`
 		RegNo         string          `json:"reg_no"`
 		Role          models.UserRole `json:"role"`
+		Internal      bool            `json:"internal"`
+		CollegeName   string          `json:"college_name"`
 	}
 	var req body
 	if err := c.BodyParser(&req); err != nil {
@@ -55,6 +54,23 @@ func SignUp(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
+
+	if !govalidator.Matches(req.ContactNumber, "^[6-9][0-9]{9}$") {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid mobile number. Must be 10 digits and start with 6-9."})
+	}
+
+	if req.Internal && req.RegNo == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "Registration number is required for internal users",
+		})
+	}
+
+	if !req.Internal && req.CollegeName == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "College name is required for external users",
+		})
+	}
+
 	role := req.Role
 	if !models.IsValidRole(role) {
 		role = models.RoleParticipant
@@ -64,6 +80,7 @@ func SignUp(c *fiber.Ctx) error {
 	err := initializer.Database.Db.Preload("Team").Where("email = ?", email).First(&existing).Error
 	if err == nil {
 		toSave := false
+
 		if existing.Name == "" && name != "" {
 			existing.Name = name
 			toSave = true
@@ -72,18 +89,51 @@ func SignUp(c *fiber.Ctx) error {
 			existing.ProfilePictureURL = picture
 			toSave = true
 		}
+		if req.Internal {
+			existing.Internal = true
+			existing.CollegeName = internalCollegeName
+			toSave = true
+		} else {
+			if req.CollegeName != "" && existing.CollegeName == "" {
+				existing.CollegeName = req.CollegeName
+				toSave = true
+			}
+		}
+
+		if existing.Role == "" && role != "" {
+			existing.Role = role
+			toSave = true
+		}
+		if existing.ContactNumber == "" && req.ContactNumber != "" {
+			existing.ContactNumber = req.ContactNumber
+			toSave = true
+		}
+		if existing.Gender == "" && req.Gender != "" {
+			existing.Gender = req.Gender
+			toSave = true
+		}
+		if existing.RegNo == "" && req.RegNo != "" {
+			existing.RegNo = req.RegNo
+			toSave = true
+		}
+
 		if toSave {
-			_ = initializer.Database.Db.Save(&existing).Error
+			if err := initializer.Database.Db.Save(&existing).Error; err != nil {
+				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update existing user"})
+			}
 		}
 		return c.Status(http.StatusOK).JSON(fiber.Map{
 			"message": "User already exists",
 			"user":    existing,
 		})
 	}
-	if err != gorm.ErrRecordNotFound {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to check existing user",
-		})
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing user"})
+	}
+
+	college := req.CollegeName
+	if req.Internal {
+		college = internalCollegeName
 	}
 
 	user := models.User{
@@ -93,20 +143,17 @@ func SignUp(c *fiber.Ctx) error {
 		ContactNumber:     req.ContactNumber,
 		Gender:            req.Gender,
 		RegNo:             req.RegNo,
+		Internal:          req.Internal,
+		CollegeName:       college,
 		Role:              role,
 	}
 
 	if _, vErr := govalidator.ValidateStruct(user); vErr != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": vErr.Error(),
-		})
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": vErr.Error()})
 	}
 
-	// Create
 	if err := initializer.Database.Db.Create(&user).Error; err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to create user",
-		})
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user"})
 	}
 
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
@@ -118,23 +165,17 @@ func SignUp(c *fiber.Ctx) error {
 func SignIn(c *fiber.Ctx) error {
 	rawClaims := c.Locals("claims")
 	if rawClaims == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Missing auth claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Missing auth claims"})
 	}
 
 	claims, ok := rawClaims.(map[string]interface{})
 	if !ok {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Invalid auth claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid auth claims"})
 	}
 
 	email, _ := claims["email"].(string)
 	if email == "" {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "Email not present in token claims",
-		})
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Email not present in token claims"})
 	}
 
 	name, _ := claims["name"].(string)
@@ -164,6 +205,12 @@ func SignIn(c *fiber.Ctx) error {
 		user.ProfilePictureURL = picture
 		updated = true
 	}
+
+	if user.Internal && user.CollegeName != internalCollegeName {
+		user.CollegeName = internalCollegeName
+		updated = true
+	}
+
 	if updated {
 		_ = initializer.Database.Db.Save(&user).Error
 	}
@@ -172,4 +219,38 @@ func SignIn(c *fiber.Ctx) error {
 		"message": "Signed in",
 		"user":    user,
 	})
+}
+
+func GetUser(c *fiber.Ctx) error {
+	if u := c.Locals("user"); u != nil {
+		if user, ok := u.(models.User); ok {
+			return c.Status(http.StatusOK).JSON(fiber.Map{"user": user})
+		}
+		if userPtr, ok := u.(*models.User); ok && userPtr != nil {
+			return c.Status(http.StatusOK).JSON(fiber.Map{"user": userPtr})
+		}
+	}
+
+	rawClaims := c.Locals("claims")
+	if rawClaims == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Missing auth claims"})
+	}
+	claims, ok := rawClaims.(map[string]interface{})
+	if !ok {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid auth claims"})
+	}
+	email, _ := claims["email"].(string)
+	if email == "" {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{"error": "Email not present in token claims"})
+	}
+
+	var user models.User
+	if err := initializer.Database.Db.Preload("Team").Where("email = ?", email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch user"})
+	}
+
+	return c.Status(http.StatusOK).JSON(fiber.Map{"user": user})
 }

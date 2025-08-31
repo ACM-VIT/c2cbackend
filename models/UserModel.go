@@ -10,7 +10,9 @@ type User struct {
 	ProfilePictureURL string     `gorm:"type:text" json:"profile_picture_url" valid:"url~URL is not valid"`
 	ContactNumber     string     `gorm:"type:varchar(20);not null" json:"contact_number" valid:"required~Contact number is required,numeric~Contact number must be numeric"`
 	Gender            string     `gorm:"type:varchar(10);not null" json:"gender" valid:"in(male|female|other)~Gender must be male female or other"`
-	RegNo             string     `gorm:"type:varchar(20);not null;unique" json:"reg_no" valid:"required~Registration number is required"`
+	RegNo             string     `gorm:"type:varchar(20);unique" json:"reg_no"`
+	Internal          bool       `gorm:"default:false" json:"internal"`
+	CollegeName       string     `gorm:"type:varchar(100);" json:"college_name"`
 	Role              UserRole   `gorm:"type:varchar(20);not null" json:"role" valid:"in(admin|reviewer|participant)~Role must be admin/reviewer/participant"`
 	TeamID            *uuid.UUID `gorm:"type:uuid;" json:"team_id"`
 	Team              *Team      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
