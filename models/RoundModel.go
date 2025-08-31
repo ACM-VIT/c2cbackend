@@ -6,7 +6,8 @@ type Round struct {
 	BaseModel
 	Name        string    `gorm:"type:varchar(100);not null" json:"name" valid:"required~Name is required,matches(^[a-zA-Z0-9 ]+$)~Name must be alphanumeric"`
 	RoundNumber int       `gorm:"type:int;not null;unique" json:"round_number" valid:"required~Round number is required"`
-	ScreenFlag  bool      `gorm:"type:boolean;default:false" json:"ppt_flag"`
+	ScreenFlag  bool      `gorm:"type:boolean;default:false" json:"screen_flag"`
+	PPTFlag     bool      `gorm:"type:boolean;default:false" json:"ppt_flag"`
 	StartTime   time.Time `gorm:"type:timestamp;index" json:"start_time,omitempty"`
 	EndTime     time.Time `gorm:"type:timestamp;index" json:"end_time,omitempty"`
 	Description *string   `gorm:"type:text" json:"description,omitempty"`
