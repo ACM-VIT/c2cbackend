@@ -157,12 +157,12 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 
 	// track_id is MANDATORY now
 	type submissionInput struct {
-		PPTURL      string     `json:"ppt_url"`
+		PPTURL      string     `json:"ppt_url,omitempty"`
 		Description *string    `json:"description,omitempty"`
 		GithubURL   *string    `json:"github_url,omitempty"`
 		FigmaURL    *string    `json:"figma_url,omitempty"`
 		Other       *string    `json:"other,omitempty"`
-		TrackID     *uuid.UUID `json:"track_id"` // required
+		TrackID     *uuid.UUID `json:"track_id"`
 	}
 
 	var input submissionInput
@@ -425,6 +425,32 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team is full"})
 	}
 
+	var teamCollege *string
+	if memberCount > 0 {
+		var existingCollege string
+		if err := tx.Model(&models.User{}).
+			Select("college_name").
+			Where("team_id = ? AND college_name IS NOT NULL AND TRIM(college_name) <> ''", team.ID).
+			Limit(1).
+			Scan(&existingCollege).Error; err == nil && strings.TrimSpace(existingCollege) != "" {
+			teamCollege = &existingCollege
+			_ = tx.Model(&models.Team{}).Where("id = ?", team.ID).Update("college_name", existingCollege).Error
+		}
+	}
+	//
+
+	if teamCollege != nil {
+		if strings.TrimSpace(freshUser.CollegeName) == "" || !strings.EqualFold(strings.TrimSpace(freshUser.CollegeName), strings.TrimSpace(*teamCollege)) {
+			tx.Rollback()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User's college does not match the team's college"})
+		}
+	} else {
+		if err := tx.Model(&models.Team{}).Where("id = ?", team.ID).Update("college_name", freshUser.CollegeName).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to set team college"})
+		}
+	}
+
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id IS NULL", freshUser.ID).
 		Update("team_id", team.ID)
@@ -500,11 +526,16 @@ func LeaveTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Team membership changed, please retry"})
 	}
 
+	if exec := tx.Exec("DELETE FROM round_teams WHERE team_id = ?", oldTeamID); exec.Error != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to remove team from rounds"})
+	}
+
 	del := tx.Exec(`
-  DELETE FROM teams
-  WHERE id = ?
-    AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
-`, oldTeamID, oldTeamID)
+	DELETE FROM teams
+	WHERE id = ?
+		AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
+	`, oldTeamID, oldTeamID)
 
 	if del.Error != nil {
 		tx.Rollback()
