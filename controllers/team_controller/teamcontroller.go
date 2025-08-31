@@ -216,8 +216,8 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// Pick the current round (if multiple active rounds, take the first)
 	currentRound := team.Rounds[0]
 
-	// Validate Screen presence only when required by flag
-	if currentRound.ScreenFlag && input.PPTURL == "" {
+	// 1) PPT mandatory when PPTFlag is true
+	if currentRound.PPTFlag && input.PPTURL == "" {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
 	}
@@ -253,6 +253,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing submission"})
 	}
 
+	// Update team fields from input (optional)
 	teamUpdates := map[string]interface{}{}
 	if input.TrackID != nil && *input.TrackID != uuid.Nil {
 		teamUpdates["track_id"] = *input.TrackID
@@ -288,14 +289,55 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create submission"})
 	}
 
+	promoted := false
+	if currentRound.ScreenFlag {
+		var externalCount int64
+		if err := tx.Model(&models.User{}).
+			Where("team_id = ? AND internal = ?", team.ID, false).
+			Count(&externalCount).Error; err != nil {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team composition"})
+		}
+
+		if externalCount > 0 {
+			var nextRound models.Round
+			if err := tx.Where("round_number > ?", currentRound.RoundNumber).
+				Order("round_number ASC").
+				First(&nextRound).Error; err == nil {
+				var linkCount int64
+				if err := tx.Table("round_teams").
+					Where("team_id = ? AND round_id = ?", team.ID, nextRound.ID).
+					Count(&linkCount).Error; err != nil {
+					_ = tx.Rollback()
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to verify promotion status"})
+				}
+				if linkCount == 0 {
+					// Use explicit insert to respect transaction & avoid separate session in Association()
+					if err := tx.Table("round_teams").
+						Create(map[string]interface{}{
+							"team_id":  team.ID,
+							"round_id": nextRound.ID,
+						}).Error; err != nil {
+						_ = tx.Rollback()
+						return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to promote team to next round"})
+					}
+				}
+				promoted = true
+			}
+			// If no next round exists, skip promotion.
+		}
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize submission"})
 	}
 
+	// Enrich response (best-effort)
 	if err := db.Preload("Users").Preload("Track").
 		First(&team, "id = ?", team.ID).Error; err != nil {
 		return c.JSON(fiber.Map{
 			"message":    "Submission created",
+			"promoted":   promoted,
 			"team":       fiber.Map{"id": team.ID},
 			"submission": fiber.Map{"id": submission.ID},
 		})
@@ -304,6 +346,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"message":    "Submission created",
+		"promoted":   promoted,
 		"team":       team,
 		"submission": submission,
 	})
