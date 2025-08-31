@@ -248,7 +248,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Submission already exists for this round"})
 	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing submission"})
 	}
