@@ -519,3 +519,48 @@ func LeaveTeam(c *fiber.Ctx) error {
 		"teamDeleted": del.RowsAffected > 0,
 	})
 }
+
+func GetTeamSubmission(c *fiber.Ctx) error {
+    user, ok := c.Locals("user").(models.User)
+    if !ok {
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+    }
+    if user.TeamID == nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
+    }
+
+    db := initializer.Database.Db
+
+    now := time.Now()
+    var team models.Team
+    if err := db.
+        Preload("Rounds", "start_time <= ? AND end_time >= ?", now, now).
+        First(&team, "id = ?", *user.TeamID).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Team not found"})
+        }
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load team"})
+    }
+
+    if len(team.Rounds) == 0 {
+        return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No active round for this team"})
+    }
+
+    currentRound := team.Rounds[0]
+
+    var submission models.Submission
+    if err := db.
+        Preload("Team").
+        Where("team_id = ? AND round_id = ?", team.ID, currentRound.ID).
+        First(&submission).Error; err != nil {
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Submission not found"})
+        }
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve submission"})
+    }
+
+    return c.JSON(fiber.Map{
+        "message":    "Submission retrieved",
+        "submission": submission,
+    })
+}
