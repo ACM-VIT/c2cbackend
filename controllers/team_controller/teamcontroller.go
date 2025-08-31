@@ -216,8 +216,8 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// Pick the current round (if multiple active rounds, take the first)
 	currentRound := team.Rounds[0]
 
-	// Validate PPT presence only when required by flag
-	if currentRound.PPTFlag && input.PPTURL == "" {
+	// Validate Screen presence only when required by flag
+	if currentRound.ScreenFlag && input.PPTURL == "" {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
 	}
