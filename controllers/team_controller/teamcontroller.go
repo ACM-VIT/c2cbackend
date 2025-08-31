@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -74,6 +75,27 @@ func CreateTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create team"})
 	}
 
+	{
+		var earliestRound models.Round
+		err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("start_time IS NOT NULL").
+			Order("start_time ASC").
+			Limit(1).
+			First(&earliestRound).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to find earliest round"})
+		}
+		if err == nil {
+			// insert into join table within the same transaction
+			if exec := tx.Exec("INSERT INTO round_teams (round_id, team_id) VALUES (?, ?)", earliestRound.ID, team.ID); exec.Error != nil {
+				_ = tx.Rollback()
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to associate team with earliest round"})
+			}
+		}
+	}
+
 	// Lock & reload user, then assign team if still free
 	var freshUser models.User
 	if err := tx.
@@ -131,7 +153,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	type submissionInput struct {
 		PPTURL      string     `json:"ppt_url"`
 		Description *string    `json:"description,omitempty"`
-		RoundID     uuid.UUID  `json:"round_id"`
 		GithubURL   *string    `json:"github_url,omitempty"`
 		FigmaURL    *string    `json:"figma_url,omitempty"`
 		Other       *string    `json:"other,omitempty"`
@@ -156,10 +177,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	input.FigmaURL = trimPtr(input.FigmaURL)
 	input.Other = trimPtr(input.Other)
 
-	if input.RoundID == uuid.Nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "round_id is required"})
-	}
-
 	db := initializer.Database.Db
 	tx := db.Begin()
 	if tx.Error != nil {
@@ -171,8 +188,12 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		}
 	}()
 
+	// Load team and only preload rounds that are active right now
+	now := time.Now()
 	var team models.Team
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Rounds", "start_time <= ? AND end_time >= ?", now, now).
 		Where("id = ?", *user.TeamID).
 		First(&team).Error; err != nil {
 		_ = tx.Rollback()
@@ -180,6 +201,21 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Team not found"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load team"})
+	}
+
+	// Ensure there is at least one active round associated to the team
+	if len(team.Rounds) == 0 {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No active round for this team at the current time"})
+	}
+
+	// Pick the current round (if multiple active rounds, take the first)
+	currentRound := team.Rounds[0]
+
+	// Validate PPT presence only when required by flag
+	if currentRound.PPTFlag && input.PPTURL == "" {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
 	}
 
 	var memberCount int64
@@ -199,26 +235,10 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Team must have at least %d members to submit", minTeamSize)})
 	}
 
-	var round models.Round
-	if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
-		Where("id = ?", input.RoundID).
-		First(&round).Error; err != nil {
-		_ = tx.Rollback()
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Round not found"})
-		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load round"})
-	}
-
-	// Validate PPT presence only when required by flag
-	if round.PPTFlag && input.PPTURL == "" {
-		_ = tx.Rollback()
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
-	}
-
+	// Check existing submission for this team & current round
 	var existing models.Submission
 	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("team_id = ? AND round_id = ?", team.ID, input.RoundID).
+		Where("team_id = ? AND round_id = ?", team.ID, currentRound.ID).
 		First(&existing).Error
 	if err == nil {
 		_ = tx.Rollback()
@@ -252,7 +272,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	submission := models.Submission{
 		PPTURL:      input.PPTURL,
 		Description: input.Description,
-		RoundID:     input.RoundID,
+		RoundID:     currentRound.ID,
 		TeamID:      &team.ID,
 	}
 	if err := tx.Create(&submission).Error; err != nil {

@@ -14,7 +14,7 @@ type Team struct {
 	TrackID              *uuid.UUID `json:"track_id"`
 	Track                Track      `gorm:"foreignKey:TrackID" json:"track"`
 	Users                []User     `json:"users"`
-	Rounds               []Round    `gorm:"many2many:round_teams;" json:"rounds"`
+	Rounds               []Round    `gorm:"many2many:round_teams;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"rounds"`
 	Reviews              []Review   `gorm:"foreignKey:TeamID" json:"reviews"`
 }
 
