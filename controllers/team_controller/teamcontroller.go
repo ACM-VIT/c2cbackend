@@ -20,6 +20,10 @@ import (
 func CreateTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team creation is currently locked"})
+	}
+
 	// User must not already be in a team
 	if user.TeamID != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is already in a team"})
@@ -212,8 +216,8 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// Pick the current round (if multiple active rounds, take the first)
 	currentRound := team.Rounds[0]
 
-	// Validate PPT presence only when required by flag
-	if currentRound.PPTFlag && input.PPTURL == "" {
+	// Validate Screen presence only when required by flag
+	if currentRound.ScreenFlag && input.PPTURL == "" {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
 	}
@@ -307,6 +311,10 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 
 func JoinTeamByCode(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
+
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team joining is currently locked"})
+	}
 
 	var body models.TeamJoinSchema
 	if err := c.BodyParser(&body); err != nil {
@@ -402,6 +410,10 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 
 func LeaveTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
+
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team leaving is currently locked"})
+	}
 
 	db := initializer.Database.Db
 	tx := db.Begin()
