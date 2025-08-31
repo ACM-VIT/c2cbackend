@@ -433,8 +433,8 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 			Where("team_id = ? AND college_name IS NOT NULL AND TRIM(college_name) <> ''", team.ID).
 			Limit(1).
 			Scan(&existingCollege).Error; err == nil && strings.TrimSpace(existingCollege) != "" {
-			teamCollege = &existingCollege
-			_ = tx.Model(&models.Team{}).Where("id = ?", team.ID).Update("college_name", existingCollege).Error
+			tmp := strings.TrimSpace(existingCollege)
+			teamCollege = &tmp
 		}
 	}
 	//
@@ -445,10 +445,8 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User's college does not match the team's college"})
 		}
 	} else {
-		if err := tx.Model(&models.Team{}).Where("id = ?", team.ID).Update("college_name", freshUser.CollegeName).Error; err != nil {
-			tx.Rollback()
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to set team college"})
-		}
+		tmp := strings.TrimSpace(freshUser.CollegeName)
+		teamCollege = &tmp
 	}
 
 	res := tx.Model(&models.User{}).
