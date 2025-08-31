@@ -3,6 +3,8 @@ package dashboardcontroller
 import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
+	"os"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -102,11 +104,16 @@ func Dashboard(c *fiber.Ctx) error {
 			trackResp = tr
 		}
 	}
+	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to parse min team size"})
+	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"user":      currentUser,
 		"team":      teamResp,
 		"teammates": teammates,
 		"track":     trackResp,
+		"minmembercount": minTeamSize,
 	})
 }
