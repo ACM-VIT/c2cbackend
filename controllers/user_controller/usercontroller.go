@@ -1,10 +1,13 @@
 package usercontroller
 
 import (
+	"c2cbackend/data"
 	"c2cbackend/initializer"
 	"c2cbackend/models"
 	"errors"
+
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -13,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const internalCollegeName = "VIT University"
+const internalCollegeName = "Vellore Institute of Technology, Vellore"
 
 func sanitizeName(s string) string {
 	s = strings.TrimSpace(s)
@@ -65,6 +68,7 @@ func SignUp(c *fiber.Ctx) error {
 		Role          models.UserRole `json:"role"`
 		Internal      bool            `json:"internal"`
 		CollegeName   string          `json:"college_name"`
+		Hosteller     *bool           `json:"hosteller"` // NEW: pointer to detect presence
 	}
 	var req body
 	if err := c.BodyParser(&req); err != nil {
@@ -78,15 +82,23 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid mobile number. Must be 10 digits and start with 6-9."})
 	}
 
+	if req.Internal {
+		if req.Hosteller == nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "Hosteller flag is required for internal participants",
+			})
+		}
+	}
+
 	if req.Internal && req.RegNo == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "Registration number is required for internal users",
+			"error": "Registration number is required for internal participants",
 		})
 	}
 
 	if !req.Internal && req.CollegeName == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "College name is required for external users",
+			"error": "College name is required for external participants",
 		})
 	}
 
@@ -114,6 +126,11 @@ func SignUp(c *fiber.Ctx) error {
 			existing.Internal = true
 			existing.CollegeName = internalCollegeName
 			toSave = true
+
+			if req.Hosteller != nil && existing.Hosteller != *req.Hosteller {
+				existing.Hosteller = *req.Hosteller
+				toSave = true
+			}
 		} else {
 			if req.CollegeName != "" && existing.CollegeName == "" {
 				existing.CollegeName = req.CollegeName
@@ -133,8 +150,13 @@ func SignUp(c *fiber.Ctx) error {
 			existing.Gender = req.Gender
 			toSave = true
 		}
-		if existing.RegNo == "" && req.RegNo != "" {
-			existing.RegNo = req.RegNo
+		if existing.RegNo == nil && req.RegNo != "" {
+			existing.RegNo = &req.RegNo
+			toSave = true
+		}
+
+		if !req.Internal && existing.RegNo != nil {
+			existing.RegNo = nil
 			toSave = true
 		}
 
@@ -163,16 +185,31 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid name after sanitization"})
 	}
 
+	hostellerVal := false
+	if req.Internal && req.Hosteller != nil {
+		hostellerVal = *req.Hosteller
+	}
+
 	user := models.User{
 		Name:              sanitizedName,
 		Email:             email,
 		ProfilePictureURL: picture,
 		ContactNumber:     req.ContactNumber,
 		Gender:            req.Gender,
-		RegNo:             req.RegNo,
-		Internal:          req.Internal,
-		CollegeName:       college,
-		Role:              role,
+		RegNo: func(s string) *string {
+			if s == "" {
+				return nil
+			}
+			return &s
+		}(req.RegNo),
+		Internal:    req.Internal,
+		Hosteller:   hostellerVal,
+		CollegeName: college,
+		Role:        role,
+	}
+
+	if !req.Internal {
+		user.RegNo = nil
 	}
 
 	if _, vErr := govalidator.ValidateStruct(user); vErr != nil {
@@ -181,6 +218,11 @@ func SignUp(c *fiber.Ctx) error {
 
 	if err := initializer.Database.Db.Create(&user).Error; err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user"})
+	}
+
+	// Ensure DB column reg_no is NULL for external participants
+	if !req.Internal {
+		_ = initializer.Database.Db.Model(&user).UpdateColumn("reg_no", gorm.Expr("NULL")).Error
 	}
 
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
@@ -280,4 +322,21 @@ func GetUser(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusOK).JSON(fiber.Map{"user": user})
+}
+
+func GetUniversityList(c *fiber.Ctx) error {
+	return c.Status(http.StatusOK).JSON(fiber.Map{"universities": data.Universities})
+}
+
+func GetCollegeByUniversityName(c *fiber.Ctx) error {
+	universityName := c.Params("uni_name")
+	universityName, err := url.QueryUnescape(universityName)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid university name"})
+	}
+	colleges, ok := data.UniColleges[universityName]
+	if !ok {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "University not found"})
+	}
+	return c.Status(http.StatusOK).JSON(fiber.Map{"colleges": colleges})
 }

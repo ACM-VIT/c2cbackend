@@ -252,7 +252,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Submission already exists for this round"})
 	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing submission"})
 	}
@@ -512,6 +512,18 @@ func LeaveTeam(c *fiber.Ctx) error {
 
 	oldTeamID := *freshUser.TeamID
 
+	var subCount int64
+	if err := tx.Model(&models.Submission{}).
+		Where("team_id = ?", oldTeamID).
+		Count(&subCount).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team submissions"})
+	}
+	if subCount > 0 {
+		tx.Rollback()
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You cannot leave a team that has submissions"})
+	}
+
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id = ?", freshUser.ID, oldTeamID).
 		Update("team_id", gorm.Expr("NULL"))
@@ -530,11 +542,10 @@ func LeaveTeam(c *fiber.Ctx) error {
 	}
 
 	del := tx.Exec(`
-	DELETE FROM teams
-	WHERE id = ?
-		AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
+		DELETE FROM teams
+		WHERE id = ?
+			AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
 	`, oldTeamID, oldTeamID)
-
 	if del.Error != nil {
 		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete team"})

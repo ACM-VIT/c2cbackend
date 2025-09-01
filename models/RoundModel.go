@@ -8,8 +8,8 @@ type Round struct {
 	RoundNumber int       `gorm:"type:int;not null;unique" json:"round_number" valid:"required~Round number is required"`
 	ScreenFlag  bool      `gorm:"type:boolean;default:false" json:"screen_flag"`
 	PPTFlag     bool      `gorm:"type:boolean;default:false" json:"ppt_flag"`
-	StartTime   time.Time `gorm:"type:timestamp;index" json:"start_time,omitempty"`
-	EndTime     time.Time `gorm:"type:timestamp;index" json:"end_time,omitempty"`
+	StartTime   time.Time `gorm:"type:timestamp;" json:"start_time,omitempty"`
+	EndTime     time.Time `gorm:"type:timestamp;" json:"end_time,omitempty"`
 	Description *string   `gorm:"type:text" json:"description,omitempty"`
 	Teams       []Team    `gorm:"many2many:round_teams;" json:"teams"`
 	Reviews     []Review  `gorm:"foreignKey:RoundID" json:"reviews"`
