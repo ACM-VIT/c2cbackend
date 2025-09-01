@@ -69,6 +69,7 @@ func SignUp(c *fiber.Ctx) error {
 		Role          models.UserRole `json:"role"`
 		Internal      bool            `json:"internal"`
 		CollegeName   string          `json:"college_name"`
+		Hosteller     *bool           `json:"hosteller"` // NEW: pointer to detect presence
 	}
 	var req body
 	if err := c.BodyParser(&req); err != nil {
@@ -82,15 +83,23 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid mobile number. Must be 10 digits and start with 6-9."})
 	}
 
+	if req.Internal {
+		if req.Hosteller == nil {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "Hosteller flag is required for internal participants",
+			})
+		}
+	}
+
 	if req.Internal && req.RegNo == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "Registration number is required for internal users",
+			"error": "Registration number is required for internal participants",
 		})
 	}
 
 	if !req.Internal && req.CollegeName == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "College name is required for external users",
+			"error": "College name is required for external participants",
 		})
 	}
 
@@ -118,6 +127,11 @@ func SignUp(c *fiber.Ctx) error {
 			existing.Internal = true
 			existing.CollegeName = internalCollegeName
 			toSave = true
+
+			if req.Hosteller != nil && existing.Hosteller != *req.Hosteller {
+				existing.Hosteller = *req.Hosteller
+				toSave = true
+			}
 		} else {
 			if req.CollegeName != "" && existing.CollegeName == "" {
 				existing.CollegeName = req.CollegeName
@@ -151,10 +165,6 @@ func SignUp(c *fiber.Ctx) error {
 			if err := initializer.Database.Db.Save(&existing).Error; err != nil {
 				return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update existing user"})
 			}
-			// // Ensure DB column reg_no is NULL for external participants
-			// if !req.Internal {
-			// 	_ = initializer.Database.Db.Model(&existing).UpdateColumn("reg_no", gorm.Expr("NULL")).Error
-			// }
 		}
 		return c.Status(http.StatusOK).JSON(fiber.Map{
 			"message": "User already exists",
@@ -176,16 +186,27 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid name after sanitization"})
 	}
 
+	hostellerVal := false
+	if req.Internal && req.Hosteller != nil {
+		hostellerVal = *req.Hosteller
+	}
+
 	user := models.User{
 		Name:              sanitizedName,
 		Email:             email,
 		ProfilePictureURL: picture,
 		ContactNumber:     req.ContactNumber,
 		Gender:            req.Gender,
-		RegNo:             func(s string) *string { if s == "" { return nil }; return &s }(req.RegNo),
-		Internal:          req.Internal,
-		CollegeName:       college,
-		Role:              role,
+		RegNo: func(s string) *string {
+			if s == "" {
+				return nil
+			}
+			return &s
+		}(req.RegNo),
+		Internal:    req.Internal,
+		Hosteller:   hostellerVal,
+		CollegeName: college,
+		Role:        role,
 	}
 
 	if !req.Internal {
