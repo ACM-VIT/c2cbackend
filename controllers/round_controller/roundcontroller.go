@@ -209,7 +209,7 @@ func PromoteToRound(c *fiber.Ctx) error {
 
 	// rno represents the NEXT round number you want to promote into
 	roundNumber, err := strconv.Atoi(c.Params("rno"))
-	if err != nil || roundNumber < 2 {
+	if err != nil || roundNumber < 1 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
 
