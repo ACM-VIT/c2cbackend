@@ -6,9 +6,11 @@ import (
 	"c2cbackend/models"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -18,6 +20,10 @@ import (
 
 func CreateTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
+
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team creation is currently locked"})
+	}
 
 	// User must not already be in a team
 	if user.TeamID != nil {
@@ -74,6 +80,27 @@ func CreateTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create team"})
 	}
 
+	{
+		var earliestRound models.Round
+		err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("start_time IS NOT NULL").
+			Order("start_time ASC").
+			Limit(1).
+			First(&earliestRound).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to find earliest round"})
+		}
+		if err == nil {
+			// insert into join table within the same transaction
+			if exec := tx.Exec("INSERT INTO round_teams (round_id, team_id) VALUES (?, ?)", earliestRound.ID, team.ID); exec.Error != nil {
+				_ = tx.Rollback()
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to associate team with earliest round"})
+			}
+		}
+	}
+
 	// Lock & reload user, then assign team if still free
 	var freshUser models.User
 	if err := tx.
@@ -128,11 +155,14 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
 	}
 
+	// track_id is MANDATORY now
 	type submissionInput struct {
-		GithubURL string    `json:"github_url"`
-		FigmaURL  string    `json:"figma_url"`
-		Other     string    `json:"other"`
-		TrackID   uuid.UUID `json:"track_id"`
+		PPTURL      string     `json:"ppt_url,omitempty"`
+		Description *string    `json:"description,omitempty"`
+		GithubURL   *string    `json:"github_url,omitempty"`
+		FigmaURL    *string    `json:"figma_url,omitempty"`
+		Other       *string    `json:"other,omitempty"`
+		TrackID     *uuid.UUID `json:"track_id"`
 	}
 
 	var input submissionInput
@@ -140,21 +170,18 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	input.GithubURL = strings.TrimSpace(input.GithubURL)
-	input.FigmaURL = strings.TrimSpace(input.FigmaURL)
-	input.Other = strings.TrimSpace(input.Other)
-
-	// Validate required fields
-	if input.GithubURL == "" || input.FigmaURL == "" || input.Other == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "All of github_url, figma_url and other are required",
-		})
+	trimPtr := func(p *string) *string {
+		if p == nil {
+			return nil
+		}
+		s := strings.TrimSpace(*p)
+		return &s
 	}
-	if input.TrackID == uuid.Nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "track_id is required",
-		})
-	}
+	input.PPTURL = strings.TrimSpace(input.PPTURL)
+	input.Description = trimPtr(input.Description)
+	input.GithubURL = trimPtr(input.GithubURL)
+	input.FigmaURL = trimPtr(input.FigmaURL)
+	input.Other = trimPtr(input.Other)
 
 	db := initializer.Database.Db
 	tx := db.Begin()
@@ -167,36 +194,12 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		}
 	}()
 
-	var track models.Track
-	if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).
-		Where("id = ?", input.TrackID).
-		First(&track).Error; err != nil {
-		_ = tx.Rollback()
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Track not found"})
-		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load track"})
-	}
-
-	var memberCount int64
-	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Invalid team min size"})
-	}
-
-	if err := tx.Model(&models.User{}).
-		Where("team_id = ?", *user.TeamID).
-		Count(&memberCount).Error; err != nil {
-		_ = tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to count team members"})
-	}
-	if memberCount < minTeamSize {
-		_ = tx.Rollback()
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Team must have at least %d members to submit", minTeamSize)})
-	}
-
+	// Load team with active round(s) now
+	now := time.Now()
 	var team models.Team
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Rounds", "start_time <= ? AND end_time >= ?", now, now).
 		Where("id = ?", *user.TeamID).
 		First(&team).Error; err != nil {
 		_ = tx.Rollback()
@@ -206,48 +209,165 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load team"})
 	}
 
-	updates := map[string]interface{}{
-		"github_url": input.GithubURL,
-		"figma_url":  input.FigmaURL,
-		"other":      input.Other,
-		"track_id":   input.TrackID,
+	if len(team.Rounds) == 0 {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No active round for this team at the current time"})
 	}
+	currentRound := team.Rounds[0]
+
+	if input.TrackID == nil || *input.TrackID == uuid.Nil {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "track_id is required"})
+	}
+
+	if currentRound.PPTFlag && input.PPTURL == "" {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
+	}
+
+	// Team size check
+	var memberCount int64
+	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
+	if err != nil {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Invalid team min size"})
+	}
+	if err := tx.Model(&models.User{}).
+		Where("team_id = ?", team.ID).
+		Count(&memberCount).Error; err != nil {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to count team members"})
+	}
+	if memberCount < minTeamSize {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Team must have at least %d members to submit", minTeamSize)})
+	}
+
+	// Ensure no prior submission for this (team, round)
+	var existing models.Submission
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("team_id = ? AND round_id = ?", team.ID, currentRound.ID).
+		First(&existing).Error
+	if err == nil {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Submission already exists for this round"})
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		_ = tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check existing submission"})
+	}
+
+	// Update Team fields (track_id is mandatory → always update)
 	if err := tx.Model(&models.Team{}).
 		Where("id = ?", team.ID).
-		Updates(updates).Error; err != nil {
+		Update("track_id", *input.TrackID).Error; err != nil {
 		_ = tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save submission"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team track"})
+	}
+
+	teamUpdates := map[string]interface{}{}
+	if input.GithubURL != nil {
+		teamUpdates["github_url"] = *input.GithubURL
+	}
+	if input.FigmaURL != nil {
+		teamUpdates["figma_url"] = *input.FigmaURL
+	}
+	if input.Other != nil {
+		teamUpdates["other"] = *input.Other
+	}
+	if len(teamUpdates) > 0 {
+		if err := tx.Model(&models.Team{}).Where("id = ?", team.ID).Updates(teamUpdates).Error; err != nil {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team info"})
+		}
+	}
+
+	// Create submission
+	submission := models.Submission{
+		PPTURL:      input.PPTURL,
+		Description: input.Description,
+		RoundID:     currentRound.ID,
+		TeamID:      &team.ID,
+	}
+	if err := tx.Create(&submission).Error; err != nil {
+		_ = tx.Rollback()
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "unique") || strings.Contains(low, "duplicate") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Submission already exists for this round"})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create submission"})
+	}
+
+	promoted := false
+	if currentRound.ScreenFlag {
+		var externalCount int64
+		if err := tx.Model(&models.User{}).
+			Where("team_id = ? AND internal = ?", team.ID, false).
+			Count(&externalCount).Error; err != nil {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team composition"})
+		}
+
+		if externalCount > 0 {
+			log.Println("Auto-promoting team", team.ID, "from round", currentRound.ID)
+			var nextRound models.Round
+			if err := tx.Where("round_number > ?", currentRound.RoundNumber).
+				Order("round_number ASC").
+				First(&nextRound).Error; err == nil {
+
+				if err := tx.Exec(`
+					INSERT INTO round_teams (round_id, team_id)
+					VALUES (?, ?)
+					ON CONFLICT (round_id, team_id) DO NOTHING
+				`, nextRound.ID, team.ID).Error; err != nil {
+					_ = tx.Rollback()
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to promote team to next round"})
+				}
+
+				promoted = true
+			}
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to finalize submission"})
 	}
 
-	// Return the updated team
+	// Reload with associations (include Rounds so caller can see current membership)
 	if err := db.Preload("Users").
 		Preload("Track").
+		Preload("Rounds").
 		First(&team, "id = ?", team.ID).Error; err != nil {
 		return c.JSON(fiber.Map{
-			"message": "Submission saved",
-			"team":    fiber.Map{"id": team.ID},
+			"message":    "Submission created",
+			"promoted":   promoted,
+			"team":       fiber.Map{"id": team.ID},
+			"submission": fiber.Map{"id": submission.ID},
 		})
 	}
+	_ = db.Preload("Team").First(&submission, "id = ?", submission.ID).Error
 
 	return c.JSON(fiber.Map{
-		"message": "Submission saved",
-		"team":    team,
+		"message":    "Submission created",
+		"promoted":   promoted,
+		"team":       team,
+		"submission": submission,
 	})
 }
 
 func JoinTeamByCode(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team joining is currently locked"})
+	}
+
 	var body models.TeamJoinSchema
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	teamCode := strings.TrimSpace(body.Code)
+	teamCode := strings.ToUpper(strings.TrimSpace(body.Code))
 	if teamCode == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team code is required"})
 	}
@@ -305,6 +425,30 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Team is full"})
 	}
 
+	var teamCollege *string
+	if memberCount > 0 {
+		var existingCollege string
+		if err := tx.Model(&models.User{}).
+			Select("college_name").
+			Where("team_id = ? AND college_name IS NOT NULL AND TRIM(college_name) <> ''", team.ID).
+			Limit(1).
+			Scan(&existingCollege).Error; err == nil && strings.TrimSpace(existingCollege) != "" {
+			tmp := strings.TrimSpace(existingCollege)
+			teamCollege = &tmp
+		}
+	}
+	//
+
+	if teamCollege != nil {
+		if strings.TrimSpace(freshUser.CollegeName) == "" || !strings.EqualFold(strings.TrimSpace(freshUser.CollegeName), strings.TrimSpace(*teamCollege)) {
+			tx.Rollback()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User's college does not match the team's college"})
+		}
+	} else {
+		tmp := strings.TrimSpace(freshUser.CollegeName)
+		teamCollege = &tmp
+	}
+
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id IS NULL", freshUser.ID).
 		Update("team_id", team.ID)
@@ -337,6 +481,10 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 func LeaveTeam(c *fiber.Ctx) error {
 	user := c.Locals("user").(models.User)
 
+	if os.Getenv("TEAM_LOCK") == "TRUE" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Team leaving is currently locked"})
+	}
+
 	db := initializer.Database.Db
 	tx := db.Begin()
 	if tx.Error != nil {
@@ -364,6 +512,18 @@ func LeaveTeam(c *fiber.Ctx) error {
 
 	oldTeamID := *freshUser.TeamID
 
+	var subCount int64
+	if err := tx.Model(&models.Submission{}).
+		Where("team_id = ?", oldTeamID).
+		Count(&subCount).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team submissions"})
+	}
+	if subCount > 0 {
+		tx.Rollback()
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You cannot leave a team that has submissions"})
+	}
+
 	res := tx.Model(&models.User{}).
 		Where("id = ? AND team_id = ?", freshUser.ID, oldTeamID).
 		Update("team_id", gorm.Expr("NULL"))
@@ -376,12 +536,16 @@ func LeaveTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Team membership changed, please retry"})
 	}
 
-	del := tx.Exec(`
-  DELETE FROM teams
-  WHERE id = ?
-    AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
-`, oldTeamID, oldTeamID)
+	if exec := tx.Exec("DELETE FROM round_teams WHERE team_id = ?", oldTeamID); exec.Error != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to remove team from rounds"})
+	}
 
+	del := tx.Exec(`
+		DELETE FROM teams
+		WHERE id = ?
+			AND NOT EXISTS (SELECT 1 FROM users WHERE team_id = ?)
+	`, oldTeamID, oldTeamID)
 	if del.Error != nil {
 		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete team"})

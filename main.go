@@ -1,6 +1,7 @@
 package main
 
 import (
+	usercontroller "c2cbackend/controllers/user_controller"
 	"c2cbackend/initializer"
 	"c2cbackend/middleware"
 	"c2cbackend/routers"
@@ -17,6 +18,10 @@ func SetupRoutes(app *fiber.App) {
 			"message": "Hello World!",
 		})
 	})
+
+	app.Get("/uni_list", usercontroller.GetUniversityList)
+	app.Get("/college/:uni_name", usercontroller.GetCollegeByUniversityName)
+
 	log.Println(os.Getenv("AUTH_USAGE"))
 	if os.Getenv("AUTH_USAGE") == "FIREBASE" {
 		public := app.Group("/api/v1", middleware.FirebaseClaims())
@@ -51,6 +56,9 @@ func main() {
 		return c.Next()
 	})
 	SetupRoutes(app)
-	app.Listen(":8080")
 
+	log.Println("Starting server on :8080")
+	if err := app.Listen(":8080"); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
