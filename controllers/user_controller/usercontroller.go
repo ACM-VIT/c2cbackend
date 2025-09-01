@@ -6,7 +6,6 @@ import (
 	"c2cbackend/models"
 	"errors"
 
-	// "fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -17,7 +16,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const internalCollegeName = "VIT University"
+const internalCollegeName = "Vellore Institute of Technology, Vellore"
 
 func sanitizeName(s string) string {
 	s = strings.TrimSpace(s)

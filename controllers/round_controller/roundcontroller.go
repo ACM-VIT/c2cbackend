@@ -23,9 +23,9 @@ func CreateRound(c *fiber.Ctx) error {
 		})
 	}
 
-	if round.RoundNumber == 0 {
+	if round.RoundNumber < 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Round number is required",
+			"error": "Round number is invalid",
 		})
 	}
 
