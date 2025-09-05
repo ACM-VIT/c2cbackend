@@ -314,7 +314,7 @@ func GetUser(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := initializer.Database.Db.Preload("Team").Where("email = ?", email).First(&user).Error; err != nil {
+	if err := initializer.Database.Db.Preload("Team.Rounds").Preload("Team").Where("email = ?", email).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 		}
