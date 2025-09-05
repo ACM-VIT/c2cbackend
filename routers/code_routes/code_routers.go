@@ -9,4 +9,7 @@ import (
 func SetUp(r fiber.Router) {
 	code := r.Group("/code")
 	code.Post("/seed", codecontroller.SeedCodesFromFile)
+	code.Post("/request", codecontroller.RequestCode)
+	code.Get("/team", codecontroller.GetTeamCodes)
+	code.Post("/assign", codecontroller.AssignCode)
 }
