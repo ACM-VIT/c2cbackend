@@ -146,6 +146,7 @@ func CreateTeam(c *fiber.Ctx) error {
 	})
 }
 
+// TODO: TAKE TITLE AND DESCRIPTION FROM PREVIOUS IF ONCE SUBMITTED
 func CreateTeamSubmission(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok {
@@ -158,6 +159,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// track_id is MANDATORY now
 	type submissionInput struct {
 		PPTURL      string     `json:"ppt_url,omitempty"`
+		Title       string     `json:"title,omitempty"`
 		Description *string    `json:"description,omitempty"`
 		GithubURL   *string    `json:"github_url,omitempty"`
 		FigmaURL    *string    `json:"figma_url,omitempty"`

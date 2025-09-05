@@ -11,5 +11,14 @@ type SponCode struct {
 	Code        string     `gorm:"type:varchar(50);unique;not null" json:"code"`
 	TeamID      *uuid.UUID `gorm:"type:uuid;unique;not null" json:"team_id"`
 	Team        Team       `gorm:"foreignKey:TeamID" json:"team"`
+	Status      ReqStatus  `gorm:"type:varchar(20);not null;default:'pending'" json:"status"`
 	RequestedAt time.Time  `json:"requested_at"`
 }
+
+type ReqStatus string
+
+const (
+	StatusPending  ReqStatus = "pending"
+	StatusApproved ReqStatus = "approved"
+	StatusDenied   ReqStatus = "denied"
+)

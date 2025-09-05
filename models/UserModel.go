@@ -2,7 +2,6 @@ package models
 
 import "github.com/google/uuid"
 
-// TO-DO ADD INDEXES
 type User struct {
 	BaseModel
 	Name              string     `gorm:"type:varchar(100);not null" json:"name" valid:"required~Name is required,matches(^[a-zA-Z0-9 ]+$)~Name must be alphabetic"`
