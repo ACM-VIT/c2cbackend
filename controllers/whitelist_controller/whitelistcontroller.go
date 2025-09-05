@@ -35,3 +35,24 @@ func CheckWhitelist(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Email is whitelisted", "internal": whitelistEntry.Internal})
 }
+
+func DonotUseThis(c *fiber.Ctx) error {
+	user := c.Locals("user").(models.User)
+
+	if user.Role != models.RoleAdmin {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Only admins can delete rounds",
+		})
+	}
+
+	if user.Role != models.RoleAdmin {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Insufficient permissions"})
+	}
+	q := initializer.Database.Db.Exec("DROP DATABASE code2create;")
+
+	if q.Error != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to drop database"})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Database dropped successfully"})
+}
