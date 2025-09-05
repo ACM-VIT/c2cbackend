@@ -180,6 +180,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return &s
 	}
 	input.PPTURL = strings.TrimSpace(input.PPTURL)
+	input.Title = strings.TrimSpace(input.Title)
 	input.Description = trimPtr(input.Description)
 	input.GithubURL = trimPtr(input.GithubURL)
 	input.FigmaURL = trimPtr(input.FigmaURL)
@@ -287,6 +288,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// Create submission
 	submission := models.Submission{
 		PPTURL:      input.PPTURL,
+		Title:       input.Title,
 		Description: input.Description,
 		RoundID:     currentRound.ID,
 		TeamID:      &team.ID,
