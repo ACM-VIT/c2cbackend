@@ -146,6 +146,7 @@ func CreateTeam(c *fiber.Ctx) error {
 	})
 }
 
+// TODO: TAKE TITLE AND DESCRIPTION FROM PREVIOUS IF ONCE SUBMITTED
 func CreateTeamSubmission(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok {
@@ -158,6 +159,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// track_id is MANDATORY now
 	type submissionInput struct {
 		PPTURL      string     `json:"ppt_url,omitempty"`
+		Title       string     `json:"title,omitempty"`
 		Description *string    `json:"description,omitempty"`
 		GithubURL   *string    `json:"github_url,omitempty"`
 		FigmaURL    *string    `json:"figma_url,omitempty"`
@@ -178,6 +180,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return &s
 	}
 	input.PPTURL = strings.TrimSpace(input.PPTURL)
+	input.Title = strings.TrimSpace(input.Title)
 	input.Description = trimPtr(input.Description)
 	input.GithubURL = trimPtr(input.GithubURL)
 	input.FigmaURL = trimPtr(input.FigmaURL)
@@ -285,6 +288,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	// Create submission
 	submission := models.Submission{
 		PPTURL:      input.PPTURL,
+		Title:       input.Title,
 		Description: input.Description,
 		RoundID:     currentRound.ID,
 		TeamID:      &team.ID,
@@ -398,6 +402,20 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Team not found"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve team"})
+	}
+
+	{
+		var subCount int64
+		if err := tx.Model(&models.Submission{}).
+			Where("team_id = ?", team.ID).
+			Count(&subCount).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team submissions"})
+		}
+		if subCount > 0 {
+			tx.Rollback()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot join a team that already has idea submitted"})
+		}
 	}
 
 	var freshUser models.User

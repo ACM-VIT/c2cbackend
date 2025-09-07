@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-//todo: implement checkin flag in rounds and user checkedin field so that the portal can conditionally render check in CTA
+// todo: implement checkin flag in rounds and user checkedin field so that the portal can conditionally render check in CTA
 func Dashboard(c *fiber.Ctx) error {
 	// Get the authenticated user
 	var ctxUser models.User
@@ -105,16 +105,25 @@ func Dashboard(c *fiber.Ctx) error {
 			trackResp = tr
 		}
 	}
+	submissionCount := int64(0)
+	if user.Team != nil {
+		db.Model(&models.Submission{}).
+			Where("team_id = ?", user.Team.ID).
+			Count(&submissionCount)
+	}
+
 	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to parse min team size"})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"user":      currentUser,
-		"team":      teamResp,
-		"teammates": teammates,
-		"track":     trackResp,
-		"minmembercount": minTeamSize,
+		"user":            currentUser,
+		"team":            teamResp,
+		"teammates":       teammates,
+		"track":           trackResp,
+		"submitted":       submissionCount > 0,
+		"minmembercount":  minTeamSize,
+		"c2chappening":    os.Getenv("C2C_HAPPENING") == "true",
 	})
 }
