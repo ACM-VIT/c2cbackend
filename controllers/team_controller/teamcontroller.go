@@ -404,6 +404,20 @@ func JoinTeamByCode(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to retrieve team"})
 	}
 
+	{
+		var subCount int64
+		if err := tx.Model(&models.Submission{}).
+			Where("team_id = ?", team.ID).
+			Count(&subCount).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to check team submissions"})
+		}
+		if subCount > 0 {
+			tx.Rollback()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot join a team that already has idea submitted"})
+		}
+	}
+
 	var freshUser models.User
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
