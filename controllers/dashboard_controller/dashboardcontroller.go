@@ -139,6 +139,43 @@ func Dashboard(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to parse min team size"})
 	}
 
+	// Determine the current round for the team (highest round in round_teams)
+	currentRoundResp := interface{}(nil)
+	if user.Team != nil {
+		var curr models.Round
+		err := db.Model(&models.Round{}).
+			Select([]string{
+				"rounds.id", "rounds.created_at", "rounds.updated_at",
+				"rounds.name", "rounds.round_number", "rounds.screen_flag", "rounds.ppt_flag",
+				"rounds.start_time", "rounds.end_time", "rounds.description", "rounds.check_in_flag",
+			}).
+			Joins("JOIN round_teams rt ON rt.round_id = rounds.id").
+			Where("rt.team_id = ?", user.Team.ID).
+			Order("rounds.round_number DESC").
+			Limit(1).
+			First(&curr).Error
+		switch err {
+		case nil:
+			currentRoundResp = fiber.Map{
+				"id":            curr.ID,
+				"created_at":    curr.CreatedAt,
+				"updated_at":    curr.UpdatedAt,
+				"name":          curr.Name,
+				"round_number":  curr.RoundNumber,
+				"screen_flag":   curr.ScreenFlag,
+				"ppt_flag":      curr.PPTFlag,
+				"start_time":    curr.StartTime,
+				"end_time":      curr.EndTime,
+				"description":   curr.Description,
+				"check_in_flag": curr.CheckInFlag,
+			}
+		case gorm.ErrRecordNotFound:
+			currentRoundResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load current round"})
+		}
+	}
+
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"user":           currentUser,
 		"team":           teamResp,
@@ -146,6 +183,7 @@ func Dashboard(c *fiber.Ctx) error {
 		"track":          trackResp,
 		"submission":     submissionResp,
 		"submitted":      submitted,
+		"current_round":  currentRoundResp,
 		"minmembercount": minTeamSize,
 		"c2chappening":   os.Getenv("C2C_HAPPENING") == "true",
 	})

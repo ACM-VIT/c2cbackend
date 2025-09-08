@@ -3,19 +3,20 @@ package routers
 import (
 	"c2cbackend/routers/code_routes"
 	"c2cbackend/routers/dashboard_routes"
+	noticerouters "c2cbackend/routers/notice_routers"
 	"c2cbackend/routers/review_routers"
 	"c2cbackend/routers/round_routers"
 	"c2cbackend/routers/team_routers"
 	"c2cbackend/routers/track_routers"
 	"c2cbackend/routers/user_routers"
-	"c2cbackend/routers/notice_routers"
-	"c2cbackend/routers/whitelist_routers"
+	whitelistrouters "c2cbackend/routers/whitelist_routers"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 func PubSet(r fiber.Router) {
 	user_routers.SetUp(r)
+	whitelistrouters.SetUp(r)
 }
 
 func Setup(r fiber.Router) {
@@ -26,5 +27,4 @@ func Setup(r fiber.Router) {
 	review_routers.SetUp(r)
 	dashboard_routes.SetUp(r)
 	noticerouters.SetUp(r)
-	whitelistrouters.SetUp(r)
 }
