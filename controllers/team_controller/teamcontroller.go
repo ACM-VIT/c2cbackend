@@ -4,6 +4,7 @@ import (
 	"c2cbackend/helpers"
 	"c2cbackend/initializer"
 	"c2cbackend/models"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -161,9 +163,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		PPTURL      string     `json:"ppt_url,omitempty"`
 		Title       string     `json:"title,omitempty"`
 		Description *string    `json:"description,omitempty"`
-		GithubURL   *string    `json:"github_url,omitempty"`
-		FigmaURL    *string    `json:"figma_url,omitempty"`
-		Other       *string    `json:"other,omitempty"`
 		TrackID     *uuid.UUID `json:"track_id"`
 	}
 
@@ -182,9 +181,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	input.PPTURL = strings.TrimSpace(input.PPTURL)
 	input.Title = strings.TrimSpace(input.Title)
 	input.Description = trimPtr(input.Description)
-	input.GithubURL = trimPtr(input.GithubURL)
-	input.FigmaURL = trimPtr(input.FigmaURL)
-	input.Other = trimPtr(input.Other)
 
 	db := initializer.Database.Db
 	tx := db.Begin()
@@ -268,22 +264,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team track"})
 	}
 
-	teamUpdates := map[string]interface{}{}
-	if input.GithubURL != nil {
-		teamUpdates["github_url"] = *input.GithubURL
-	}
-	if input.FigmaURL != nil {
-		teamUpdates["figma_url"] = *input.FigmaURL
-	}
-	if input.Other != nil {
-		teamUpdates["other"] = *input.Other
-	}
-	if len(teamUpdates) > 0 {
-		if err := tx.Model(&models.Team{}).Where("id = ?", team.ID).Updates(teamUpdates).Error; err != nil {
-			_ = tx.Rollback()
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team info"})
-		}
-	}
 
 	// Create submission
 	submission := models.Submission{
@@ -356,6 +336,81 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		"promoted":   promoted,
 		"team":       team,
 		"submission": submission,
+	})
+}
+
+func UpdateTeam(c *fiber.Ctx) error {
+		user, ok := c.Locals("user").(models.User)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	if user.TeamID == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
+	}
+	type submissionInput struct {
+		GithubURL   *string    `json:"github_url,omitempty"`
+		FigmaURL    *string    `json:"figma_url,omitempty"`
+		Other       *string    `json:"other,omitempty"`
+		TechStack   *[]string  `json:"tech_stack,omitempty"`
+	}
+
+    var input submissionInput
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	trimPtr := func(p *string) *string {
+		if p == nil {
+			return nil
+		}
+		s := strings.TrimSpace(*p)
+		return &s
+	}
+
+	var team models.Team
+
+	input.GithubURL = trimPtr(input.GithubURL)
+	input.FigmaURL = trimPtr(input.FigmaURL)
+	input.Other = trimPtr(input.Other)
+
+	db := initializer.Database.Db
+	tx := db.Begin()
+	teamUpdates := map[string]interface{}{}
+	if input.GithubURL != nil {
+		teamUpdates["github_url"] = *input.GithubURL
+	}
+	if input.FigmaURL != nil {
+		teamUpdates["figma_url"] = *input.FigmaURL
+	}
+	if input.Other != nil {
+		teamUpdates["other"] = *input.Other
+	}
+	if input.TechStack != nil {
+		b, err := json.Marshal(input.TechStack)
+		if err != nil {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid tech_stack format"})
+		}
+		teamUpdates["tech_stack"] = datatypes.JSON(b)
+	}
+	if len(teamUpdates) > 0 {
+		if err := tx.Model(&models.Team{}).Where("id = ?", *user.TeamID).Updates(teamUpdates).Error; err != nil {
+			_ = tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team info"})
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to commit transaction"})
+	}
+
+	if err := db.Preload("Users").Preload("Track").First(&team, "id = ?", *user.TeamID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to reload team"})
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Team updated successfully",
+		"team":    team,
 	})
 }
 
