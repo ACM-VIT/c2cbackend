@@ -162,6 +162,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	}
 
 	// track_id is MANDATORY now
+	log.Println("CreateTeamSubmission called by user", user.ID, "for team", *user.TeamID)
 	type submissionInput struct {
 		PPTURL      string     `json:"ppt_url,omitempty"`
 		Title       string     `json:"title,omitempty"`
@@ -187,6 +188,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 
 	db := initializer.Database.Db
 	tx := db.Begin()
+	log.Println("Transaction started for CreateTeamSubmission by user", user.ID)
 	if tx.Error != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start transaction"})
 	}
@@ -201,7 +203,9 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	var team models.Team
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Preload("Rounds", "start_time <= ? AND end_time >= ?", now, now).
+		Preload("Rounds", func(db *gorm.DB) *gorm.DB {
+			return db.Where("start_time <= ? AND end_time >= ?", now, now).Order("round_number ASC")
+		}).
 		Where("id = ?", *user.TeamID).
 		First(&team).Error; err != nil {
 		_ = tx.Rollback()
@@ -210,11 +214,13 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load team"})
 	}
+	log.Println("Loaded team", team.ID, "with", len(team.Rounds), "active rounds for submission by user", user.ID)
 
 	if len(team.Rounds) == 0 {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No active round for this team at the current time"})
 	}
+	log.Println("Team", team.ID, "is in active rounds:", team.Rounds)
 	currentRound := team.Rounds[0]
 
 	if input.TrackID == nil || *input.TrackID == uuid.Nil {
