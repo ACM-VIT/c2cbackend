@@ -3,6 +3,7 @@ package dashboardcontroller
 import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
+	"fmt"
 	"os"
 	"strconv"
 
@@ -112,18 +113,20 @@ func Dashboard(c *fiber.Ctx) error {
 	if user.Team != nil {
 		var sub models.Submission
 		err := db.Model(&models.Submission{}).
-			Select([]string{"ppt_url", "title", "description"}).
+			Preload("Round").
+			Select([]string{"ppt_url", "title", "description", "round_id"}).
 			Where("team_id = ?", user.Team.ID).
 			Order("created_at desc").
 			First(&sub).Error
-
+		fmt.Println(sub.Round)
 		switch err {
 		case nil:
 			submitted = true
 			submissionResp = fiber.Map{
-				"ppt_url":     sub.PPTURL,
-				"title":       sub.Title,
-				"description": sub.Description,
+				"ppt_url":        sub.PPTURL,
+				"title":          sub.Title,
+				"description":    sub.Description,
+				"round_end_time": sub.Round.EndTime,
 			}
 		case gorm.ErrRecordNotFound:
 			submitted = false

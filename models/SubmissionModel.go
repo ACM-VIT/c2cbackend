@@ -10,4 +10,5 @@ type Submission struct {
 	RoundID     uuid.UUID  `gorm:"type:uuid;constraint:OnDelete:CASCADE,OnUpdate:CASCADE;uniqueIndex:idx_team_round" json:"round_id"`
 	TeamID      *uuid.UUID `gorm:"uniqueIndex:idx_team_round" json:"team_id"`
 	Team        Team       `gorm:"foreignKey:TeamID" json:"team"`
+	Round       Round      `gorm:"foreignKey:RoundID" json:"round"`
 }
