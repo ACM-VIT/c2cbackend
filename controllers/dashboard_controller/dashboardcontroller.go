@@ -44,7 +44,7 @@ func Dashboard(c *fiber.Ctx) error {
 				"id", "created_at", "updated_at",
 				"name", "description", "code",
 				"github_url", "figma_url", "other",
-				"track_id",
+				"track_id", "tech_stack",
 			})
 		}).
 		Preload("Team.Track", func(db *gorm.DB) *gorm.DB {
@@ -77,7 +77,7 @@ func Dashboard(c *fiber.Ctx) error {
 	teammates := []models.User{}
 
 	if user.Team != nil {
-		// Build a flat team JSON without the `track` field
+
 		teamResp = fiber.Map{
 			"id":          user.Team.ID,
 			"created_at":  user.Team.CreatedAt,
@@ -89,6 +89,7 @@ func Dashboard(c *fiber.Ctx) error {
 			"figma_url":   user.Team.FigmaURL,
 			"other":       user.Team.Other,
 			"track_id":    user.Team.TrackID,
+			"tech_stack":  user.Team.TechStack,
 		}
 
 		for _, u := range user.Team.Users {
@@ -105,11 +106,31 @@ func Dashboard(c *fiber.Ctx) error {
 			trackResp = tr
 		}
 	}
-	submissionCount := int64(0)
+
+	submissionResp := interface{}(nil)
+	submitted := false
 	if user.Team != nil {
-		db.Model(&models.Submission{}).
+		var sub models.Submission
+		err := db.Model(&models.Submission{}).
+			Select([]string{"ppt_url", "title", "description"}).
 			Where("team_id = ?", user.Team.ID).
-			Count(&submissionCount)
+			Order("created_at desc").
+			First(&sub).Error
+
+		switch err {
+		case nil:
+			submitted = true
+			submissionResp = fiber.Map{
+				"ppt_url":     sub.PPTURL,
+				"title":       sub.Title,
+				"description": sub.Description,
+			}
+		case gorm.ErrRecordNotFound:
+			submitted = false
+			submissionResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load submission"})
+		}
 	}
 
 	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
@@ -118,12 +139,13 @@ func Dashboard(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"user":            currentUser,
-		"team":            teamResp,
-		"teammates":       teammates,
-		"track":           trackResp,
-		"submitted":       submissionCount > 0,
-		"minmembercount":  minTeamSize,
-		"c2chappening":    os.Getenv("C2C_HAPPENING") == "true",
+		"user":           currentUser,
+		"team":           teamResp,
+		"teammates":      teammates,
+		"track":          trackResp,
+		"submission":     submissionResp,
+		"submitted":      submitted,
+		"minmembercount": minTeamSize,
+		"c2chappening":   os.Getenv("C2C_HAPPENING") == "true",
 	})
 }
