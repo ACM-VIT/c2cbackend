@@ -142,13 +142,17 @@ func GetRoundTeamRankings(c *fiber.Ctx) error {
 
 	var rows []row
 
-	// Sum directly from scores (design, implementation, uniqueness, practicality)
-	// and exclude soft-deleted rows if you use gorm.DeletedAt on those tables.
 	const q = `
 SELECT
   t.id   AS team_id,
   t.name AS team_name,
-  COALESCE(SUM(s.design + s.implementation + s.uniqueness + s.practicality), 0) AS total
+  COALESCE(SUM(
+    s.innovation_relevance
+  + s.technical_depth_complexity
+  + s.implementation_functionality
+  + s.user_experience_presentation
+  + s.progress_development
+  ), 0) AS total
 FROM teams t
 JOIN round_teams rt
   ON rt.team_id = t.id
@@ -167,13 +171,13 @@ GROUP BY t.id, t.name
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch team rankings"})
 	}
 
-	// Sort by total desc, then name asc (stable for deterministic ties)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Total == rows[j].Total {
 			return rows[i].TeamName < rows[j].TeamName
 		}
 		return rows[i].Total > rows[j].Total
 	})
+
 	rankings := make([]helpers.TeamRanking, len(rows))
 	prevScore := -1
 	prevRank := 0

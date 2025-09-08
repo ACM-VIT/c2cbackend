@@ -89,14 +89,14 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 
-		// create score with fields (single row)
 		score = models.Score{
-			ReviewID:       review.ID,
-			Design:         body.Design,
-			Implementation: body.Implementation,
-			Uniqueness:     body.Uniqueness,
-			Practicality:   body.Practicality,
-			Comments:       body.Comments,
+			ReviewID:                    review.ID,
+			InnovationRelevance:         body.InnovationRelevance,
+			TechnicalDepthComplexity:    body.TechnicalDepthComplexity,
+			ImplementationFunctionality: body.ImplementationFunctionality,
+			UserExperiencePresentation:  body.UserExperiencePresentation,
+			ProgressDevelopment:         body.ProgressDevelopment,
+			Comments:                    body.Comments,
 		}
 		if err := tx.Create(&score).Error; err != nil {
 			return err
@@ -125,99 +125,12 @@ func PostReview(c *fiber.Ctx) error {
 		"team_id":        review.TeamID,
 		"reviewed_by_id": review.ReviewedByID,
 		"detail": fiber.Map{
-			"design":         score.Design,
-			"implementation": score.Implementation,
-			"uniqueness":     score.Uniqueness,
-			"practicality":   score.Practicality,
-			"comments":       score.Comments,
+			"innovation_relevance":         score.InnovationRelevance,
+			"technical_depth_complexity":   score.TechnicalDepthComplexity,
+			"implementation_functionality": score.ImplementationFunctionality,
+			"user_experience_presentation": score.UserExperiencePresentation,
+			"progress_development":         score.ProgressDevelopment,
+			"comments":                     score.Comments,
 		},
 	})
-}
-
-func DeleteReview(c *fiber.Ctx) error {
-	user, ok := c.Locals("user").(models.User)
-	if !ok || user.ID == uuid.Nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
-	}
-	if user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can delete reviews"})
-	}
-
-	// Parse round number
-	rno, err := strconv.Atoi(c.Params("rno"))
-	if err != nil || rno < 1 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
-	}
-
-	// Parse team UUID
-	teamID, err := uuid.Parse(c.Params("team_id"))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid team id"})
-	}
-
-	db := initializer.Database.Db
-
-	txErr := db.Transaction(func(tx *gorm.DB) error {
-		// Find the round by round_number
-		var round models.Round
-		if err := tx.Where("round_number = ?", rno).First(&round).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fiber.NewError(fiber.StatusNotFound, "round not found")
-			}
-			return err
-		}
-
-		// Find the review for that round and team
-		var review models.Review
-		if err := tx.Where("round_id = ? AND team_id = ?", round.ID, teamID).First(&review).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fiber.NewError(fiber.StatusNotFound, "review not found")
-			}
-			return err
-		}
-
-		// Delete scores (optional if ON DELETE CASCADE is set on FK)
-		if err := tx.Where("review_id = ?", review.ID).Delete(&models.Score{}).Error; err != nil {
-			return err
-		}
-
-		// Delete the review
-		if err := tx.Delete(&review).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if txErr != nil {
-		var ferr *fiber.Error
-		if errors.As(txErr, &ferr) {
-			return c.Status(ferr.Code).JSON(fiber.Map{"error": ferr.Message})
-		}
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete review"})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "review deleted successfully"})
-}
-
-func GetReviews(c *fiber.Ctx) error {
-	user, ok := c.Locals("user").(models.User)
-	if !ok || user.ID == uuid.Nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
-	}
-	if user.Role != models.RoleAdmin {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can view reviews"})
-	}
-
-	var reviews []models.Review
-	if err := initializer.Database.Db.
-		Preload("ReviewedBy").
-		Preload("Team").
-		Preload("Round").
-		Preload("Scores").
-		Find(&reviews).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to retrieve reviews"})
-	}
-
-	return c.Status(fiber.StatusOK).JSON(reviews)
 }
