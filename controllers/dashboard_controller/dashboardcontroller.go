@@ -5,6 +5,7 @@ import (
 	"c2cbackend/models"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -141,6 +142,7 @@ func Dashboard(c *fiber.Ctx) error {
 
 	// Determine the current round for the team (highest round in round_teams)
 	currentRoundResp := interface{}(nil)
+	activeRoundResp := interface{}(nil)
 	if user.Team != nil {
 		var curr models.Round
 		err := db.Model(&models.Round{}).
@@ -174,17 +176,69 @@ func Dashboard(c *fiber.Ctx) error {
 		default:
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load current round"})
 		}
+
+		// Load all rounds the team has participated in
+		var teamRounds []models.Round
+		if err := db.Model(&models.Round{}).
+			Select([]string{
+				"rounds.id", "rounds.created_at", "rounds.updated_at",
+				"rounds.name", "rounds.round_number", "rounds.screen_flag", "rounds.ppt_flag",
+				"rounds.start_time", "rounds.end_time", "rounds.description", "rounds.check_in_flag",
+			}).
+			Joins("JOIN round_teams rt ON rt.round_id = rounds.id").
+			Where("rt.team_id = ?", user.Team.ID).
+			Order("rounds.round_number ASC").
+			Find(&teamRounds).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load team rounds"})
+		}
+	}
+
+	// Determine the currently active round based on time (global)
+	now := time.Now()
+	{
+		var active models.Round
+		err := db.Model(&models.Round{}).
+			Select([]string{
+				"id", "created_at", "updated_at",
+				"name", "round_number", "screen_flag", "ppt_flag",
+				"start_time", "end_time", "description", "check_in_flag",
+			}).
+			Where("start_time <= ? AND end_time >= ?", now, now).
+			Order("round_number DESC").
+			Limit(1).
+			First(&active).Error
+		switch err {
+		case nil:
+			activeRoundResp = fiber.Map{
+				"id":            active.ID,
+				"created_at":    active.CreatedAt,
+				"updated_at":    active.UpdatedAt,
+				"name":          active.Name,
+				"round_number":  active.RoundNumber,
+				"screen_flag":   active.ScreenFlag,
+				"ppt_flag":      active.PPTFlag,
+				"start_time":    active.StartTime,
+				"end_time":      active.EndTime,
+				"description":   active.Description,
+				"check_in_flag": active.CheckInFlag,
+			}
+		case gorm.ErrRecordNotFound:
+			activeRoundResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load active round"})
+		}
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"user":           currentUser,
-		"team":           teamResp,
-		"teammates":      teammates,
-		"track":          trackResp,
-		"submission":     submissionResp,
-		"submitted":      submitted,
-		"current_round":  currentRoundResp,
-		"minmembercount": minTeamSize,
-		"c2chappening":   os.Getenv("C2C_HAPPENING") == "true",
+		"user":               currentUser,
+		"team":               teamResp,
+		"teammates":          teammates,
+		"track":              trackResp,
+		"submission":         submissionResp,
+		"submitted":          submitted,
+		"current_team_round": currentRoundResp,
+		"active_round":       activeRoundResp,
+		"minmembercount":     minTeamSize,
+		"c2chappening":       os.Getenv("C2C_HAPPENING") == "true",
 	})
 }

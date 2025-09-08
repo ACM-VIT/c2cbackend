@@ -79,7 +79,10 @@ func CreateTeam(c *fiber.Ctx) error {
 	}
 	if createErr != nil {
 		_ = tx.Rollback()
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create team"})
+		low := strings.ToLower(createErr.Error())
+		if strings.Contains(low, "unique") && strings.Contains(low, "name") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Please choose a different team name!"})
+		}
 	}
 
 	{
