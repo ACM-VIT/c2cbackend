@@ -3,7 +3,6 @@ package dashboardcontroller
 import (
 	"c2cbackend/initializer"
 	"c2cbackend/models"
-	"fmt"
 	"os"
 	"strconv"
 
@@ -118,7 +117,6 @@ func Dashboard(c *fiber.Ctx) error {
 			Where("team_id = ?", user.Team.ID).
 			Order("created_at desc").
 			First(&sub).Error
-		fmt.Println(sub.Round)
 		switch err {
 		case nil:
 			submitted = true
