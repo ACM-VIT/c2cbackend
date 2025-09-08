@@ -8,5 +8,5 @@ import (
 func SetUp(r fiber.Router) {
     sub := r.Group("/submissions")
     sub.Get("/all", submissioncontroller.GetAll)
+    sub.Get("/:id", submissioncontroller.GetByID)
 }
-
