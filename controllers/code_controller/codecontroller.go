@@ -14,7 +14,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func SeedCodesFromFile(c *fiber.Ctx) error {
@@ -23,7 +22,7 @@ func SeedCodesFromFile(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
 	}
 
-	if user.Role != "admin" {
+	if user.Role != models.RoleAdmin {
 		return fiber.NewError(fiber.StatusForbidden, "forbidden")
 	}
 
@@ -125,6 +124,63 @@ func SeedCodesFromFile(c *fiber.Ctx) error {
 	})
 }
 
+const MAX_APPROVED_CODES_PER_TEAM = 5
+
+func AssignCode(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(models.User)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
+	}
+	if user.Role != models.RoleAdmin {
+		return fiber.NewError(fiber.StatusForbidden, "forbidden")
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if strings.TrimSpace(body.Code) == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "code is required")
+	}
+
+	db := initializer.Database.Db
+	var sc models.SponCode
+	code := strings.ToUpper(strings.TrimSpace(body.Code))
+	if err := db.Where("code = ?", code).First(&sc).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "code not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+	if sc.TeamID == nil {
+		return fiber.NewError(fiber.StatusBadRequest, "code not requested by any team")
+	}
+
+	var approvedCount int64
+	db.Model(&models.SponCode{}).
+		Where("team_id = ? AND status = ?", *sc.TeamID, models.StatusApproved).
+		Count(&approvedCount)
+	if approvedCount >= MAX_APPROVED_CODES_PER_TEAM {
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("max approved codes (%d) reached for team", MAX_APPROVED_CODES_PER_TEAM))
+	}
+
+	sc.Status = models.StatusApproved
+	if err := db.Save(&sc).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"code":    sc.Code,
+		"team_id": sc.TeamID,
+		"status":  sc.Status,
+	})
+}
+
+// RequestCode handles user‐triggered code requests (status stays "pending").
 func RequestCode(c *fiber.Ctx) error {
 	user, ok := c.Locals("user").(models.User)
 	if !ok {
@@ -137,60 +193,56 @@ func RequestCode(c *fiber.Ctx) error {
 
 	db := initializer.Database.Db
 
-	var existing models.SponCode
-	if err := db.Where("team_id = ?", teamID).First(&existing).Error; err == nil {
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"code":         existing.Code,
-			"team_id":      existing.TeamID,
-			"requested_at": existing.RequestedAt,
-		})
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	var teamCodeCount int64
+	db.Model(&models.SponCode{}).
+		Where("team_id = ? AND (status = ? OR status = ?)", teamID, models.StatusPending, models.StatusApproved).
+		Count(&teamCodeCount)
+	if teamCodeCount >= MAX_APPROVED_CODES_PER_TEAM {
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("max codes (%d) reached for team", MAX_APPROVED_CODES_PER_TEAM))
+	}
+
+	var available models.SponCode
+	if err := db.Where("team_id IS NULL").First(&available).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fiber.NewError(fiber.StatusNotFound, "no available codes")
+		}
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	var assigned models.SponCode
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("team_id = ?", teamID).
-			First(&existing).Error; err == nil {
-			assigned = existing
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
+	available.TeamID = &teamID
+	available.Status = models.StatusPending
+	available.RequestedAt = time.Now()
 
-		var free models.SponCode
-		q := tx.
-			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("team_id IS NULL").
-			Order("requested_at NULLS FIRST, created_at ASC, code ASC").
-			First(&free)
-
-		if q.Error != nil {
-			if errors.Is(q.Error, gorm.ErrRecordNotFound) {
-				return fiber.NewError(fiber.StatusConflict, "no codes left to assign")
-			}
-			return q.Error
-		}
-
-		now := time.Now()
-		free.TeamID = &teamID
-		free.RequestedAt = now
-
-		if err := tx.Save(&free).Error; err != nil {
-			return err
-		}
-
-		assigned = free
-		return nil
-	}); err != nil {
-		return fiber.NewError(fiber.StatusConflict, err.Error())
+	if err := db.Save(&available).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"code":         assigned.Code,
-		"team_id":      assigned.TeamID,
-		"requested_at": assigned.RequestedAt,
+		"code":         available.Code,
+		"team_id":      available.TeamID,
+		"requested_at": available.RequestedAt,
+		"status":       available.Status,
+	})
+}
+
+func GetTeamCodes(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(models.User)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "unauthorized")
+	}
+	if user.TeamID == nil || *user.TeamID == uuid.Nil {
+		return fiber.NewError(fiber.StatusBadRequest, "user is not part of any team")
+	}
+
+	db := initializer.Database.Db
+	var codes []models.SponCode
+
+	if err := db.Where("team_id = ?", *user.TeamID).Find(&codes).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"codes": codes,
 	})
 }

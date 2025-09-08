@@ -5,6 +5,12 @@ go 1.24.4
 require gorm.io/driver/postgres v1.6.0
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/go-sql-driver/mysql v1.8.1 // indirect
+	gorm.io/driver/mysql v1.5.6 // indirect
+)
+
+require (
 	cel.dev/expr v0.24.0 // indirect
 	cloud.google.com/go v0.121.0 // indirect
 	cloud.google.com/go/auth v0.16.4 // indirect
@@ -82,5 +88,6 @@ require (
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/api v0.247.0
+	gorm.io/datatypes v1.2.6
 	gorm.io/gorm v1.30.1
 )
