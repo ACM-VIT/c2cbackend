@@ -89,14 +89,15 @@ func PostReview(c *fiber.Ctx) error {
 			return err
 		}
 
-		// create score with fields (single row)
+		// create score with NEW fields
 		score = models.Score{
-			ReviewID:       review.ID,
-			Design:         body.Design,
-			Implementation: body.Implementation,
-			Uniqueness:     body.Uniqueness,
-			Practicality:   body.Practicality,
-			Comments:       body.Comments,
+			ReviewID:                    review.ID,
+			InnovationRelevance:         body.InnovationRelevance,
+			TechnicalDepthComplexity:    body.TechnicalDepthComplexity,
+			ImplementationFunctionality: body.ImplementationFunctionality,
+			UserExperiencePresentation:  body.UserExperiencePresentation,
+			ProgressDevelopment:         body.ProgressDevelopment,
+			Comments:                    body.Comments,
 		}
 		if err := tx.Create(&score).Error; err != nil {
 			return err
@@ -125,11 +126,12 @@ func PostReview(c *fiber.Ctx) error {
 		"team_id":        review.TeamID,
 		"reviewed_by_id": review.ReviewedByID,
 		"detail": fiber.Map{
-			"design":         score.Design,
-			"implementation": score.Implementation,
-			"uniqueness":     score.Uniqueness,
-			"practicality":   score.Practicality,
-			"comments":       score.Comments,
+			"innovation_relevance":         score.InnovationRelevance,
+			"technical_depth_complexity":   score.TechnicalDepthComplexity,
+			"implementation_functionality": score.ImplementationFunctionality,
+			"user_experience_presentation": score.UserExperiencePresentation,
+			"progress_development":         score.ProgressDevelopment,
+			"comments":                     score.Comments,
 		},
 	})
 }

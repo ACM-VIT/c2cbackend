@@ -5,6 +5,7 @@ import (
 	"c2cbackend/models"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -44,7 +45,7 @@ func Dashboard(c *fiber.Ctx) error {
 				"id", "created_at", "updated_at",
 				"name", "description", "code",
 				"github_url", "figma_url", "other",
-				"track_id",
+				"track_id", "tech_stack",
 			})
 		}).
 		Preload("Team.Track", func(db *gorm.DB) *gorm.DB {
@@ -77,7 +78,7 @@ func Dashboard(c *fiber.Ctx) error {
 	teammates := []models.User{}
 
 	if user.Team != nil {
-		// Build a flat team JSON without the `track` field
+
 		teamResp = fiber.Map{
 			"id":          user.Team.ID,
 			"created_at":  user.Team.CreatedAt,
@@ -89,6 +90,7 @@ func Dashboard(c *fiber.Ctx) error {
 			"figma_url":   user.Team.FigmaURL,
 			"other":       user.Team.Other,
 			"track_id":    user.Team.TrackID,
+			"tech_stack":  user.Team.TechStack,
 		}
 
 		for _, u := range user.Team.Users {
@@ -105,11 +107,32 @@ func Dashboard(c *fiber.Ctx) error {
 			trackResp = tr
 		}
 	}
-	submissionCount := int64(0)
+
+	submissionResp := interface{}(nil)
+	submitted := false
 	if user.Team != nil {
-		db.Model(&models.Submission{}).
+		var sub models.Submission
+		err := db.Model(&models.Submission{}).
+			Preload("Round").
+			Select([]string{"ppt_url", "title", "description", "round_id"}).
 			Where("team_id = ?", user.Team.ID).
-			Count(&submissionCount)
+			Order("created_at desc").
+			First(&sub).Error
+		switch err {
+		case nil:
+			submitted = true
+			submissionResp = fiber.Map{
+				"ppt_url":        sub.PPTURL,
+				"title":          sub.Title,
+				"description":    sub.Description,
+				"round_end_time": sub.Round.EndTime,
+			}
+		case gorm.ErrRecordNotFound:
+			submitted = false
+			submissionResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load submission"})
+		}
 	}
 
 	minTeamSize, err := strconv.ParseInt(os.Getenv("TEAM_MIN_SIZE"), 10, 64)
@@ -117,13 +140,105 @@ func Dashboard(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to parse min team size"})
 	}
 
+	// Determine the current round for the team (highest round in round_teams)
+	currentRoundResp := interface{}(nil)
+	activeRoundResp := interface{}(nil)
+	if user.Team != nil {
+		var curr models.Round
+		err := db.Model(&models.Round{}).
+			Select([]string{
+				"rounds.id", "rounds.created_at", "rounds.updated_at",
+				"rounds.name", "rounds.round_number", "rounds.screen_flag", "rounds.ppt_flag",
+				"rounds.start_time", "rounds.end_time", "rounds.description", "rounds.check_in_flag",
+			}).
+			Joins("JOIN round_teams rt ON rt.round_id = rounds.id").
+			Where("rt.team_id = ?", user.Team.ID).
+			Order("rounds.round_number DESC").
+			Limit(1).
+			First(&curr).Error
+		switch err {
+		case nil:
+			currentRoundResp = fiber.Map{
+				"id":            curr.ID,
+				"created_at":    curr.CreatedAt,
+				"updated_at":    curr.UpdatedAt,
+				"name":          curr.Name,
+				"round_number":  curr.RoundNumber,
+				"screen_flag":   curr.ScreenFlag,
+				"ppt_flag":      curr.PPTFlag,
+				"start_time":    curr.StartTime,
+				"end_time":      curr.EndTime,
+				"description":   curr.Description,
+				"check_in_flag": curr.CheckInFlag,
+			}
+		case gorm.ErrRecordNotFound:
+			currentRoundResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load current round"})
+		}
+
+		// Load all rounds the team has participated in
+		var teamRounds []models.Round
+		if err := db.Model(&models.Round{}).
+			Select([]string{
+				"rounds.id", "rounds.created_at", "rounds.updated_at",
+				"rounds.name", "rounds.round_number", "rounds.screen_flag", "rounds.ppt_flag",
+				"rounds.start_time", "rounds.end_time", "rounds.description", "rounds.check_in_flag",
+			}).
+			Joins("JOIN round_teams rt ON rt.round_id = rounds.id").
+			Where("rt.team_id = ?", user.Team.ID).
+			Order("rounds.round_number ASC").
+			Find(&teamRounds).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load team rounds"})
+		}
+	}
+
+	// Determine the currently active round based on time (global)
+	now := time.Now()
+	{
+		var active models.Round
+		err := db.Model(&models.Round{}).
+			Select([]string{
+				"id", "created_at", "updated_at",
+				"name", "round_number", "screen_flag", "ppt_flag",
+				"start_time", "end_time", "description", "check_in_flag",
+			}).
+			Where("start_time <= ? AND end_time >= ?", now, now).
+			Order("round_number DESC").
+			Limit(1).
+			First(&active).Error
+		switch err {
+		case nil:
+			activeRoundResp = fiber.Map{
+				"id":            active.ID,
+				"created_at":    active.CreatedAt,
+				"updated_at":    active.UpdatedAt,
+				"name":          active.Name,
+				"round_number":  active.RoundNumber,
+				"screen_flag":   active.ScreenFlag,
+				"ppt_flag":      active.PPTFlag,
+				"start_time":    active.StartTime,
+				"end_time":      active.EndTime,
+				"description":   active.Description,
+				"check_in_flag": active.CheckInFlag,
+			}
+		case gorm.ErrRecordNotFound:
+			activeRoundResp = fiber.Map{}
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load active round"})
+		}
+	}
+
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"user":            currentUser,
-		"team":            teamResp,
-		"teammates":       teammates,
-		"track":           trackResp,
-		"submitted":       submissionCount > 0,
-		"minmembercount":  minTeamSize,
-		"c2chappening":    os.Getenv("C2C_HAPPENING") == "true",
+		"user":               currentUser,
+		"team":               teamResp,
+		"teammates":          teammates,
+		"track":              trackResp,
+		"submission":         submissionResp,
+		"submitted":          submitted,
+		"current_team_round": currentRoundResp,
+		"active_round":       activeRoundResp,
+		"minmembercount":     minTeamSize,
+		"c2chappening":       os.Getenv("C2C_HAPPENING") == "true",
 	})
 }

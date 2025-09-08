@@ -137,18 +137,23 @@ func GetRoundTeamRankings(c *fiber.Ctx) error {
 	type row struct {
 		TeamID   uuid.UUID `gorm:"column:team_id"`
 		TeamName string    `gorm:"column:team_name"`
-		Total    int       `gorm:"column:total"`
+		// Use float to handle weighted sum properly
+		Total float64 `gorm:"column:total"`
 	}
 
 	var rows []row
 
-	// Sum directly from scores (design, implementation, uniqueness, practicality)
-	// and exclude soft-deleted rows if you use gorm.DeletedAt on those tables.
 	const q = `
 SELECT
   t.id   AS team_id,
   t.name AS team_name,
-  COALESCE(SUM(s.design + s.implementation + s.uniqueness + s.practicality), 0) AS total
+  COALESCE(SUM(
+      (s.innovation_relevance          * 0.20)
+    + (s.technical_depth_complexity    * 0.25)
+    + (s.implementation_functionality * 0.20)
+    + (s.user_experience_presentation * 0.20)
+    + (s.progress_development         * 0.15)
+  ), 0) AS total
 FROM teams t
 JOIN round_teams rt
   ON rt.team_id = t.id
@@ -167,15 +172,16 @@ GROUP BY t.id, t.name
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch team rankings"})
 	}
 
-	// Sort by total desc, then name asc (stable for deterministic ties)
+	// Sort by weighted total
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Total == rows[j].Total {
 			return rows[i].TeamName < rows[j].TeamName
 		}
 		return rows[i].Total > rows[j].Total
 	})
+
 	rankings := make([]helpers.TeamRanking, len(rows))
-	prevScore := -1
+	prevScore := -1.0
 	prevRank := 0
 	for i, r := range rows {
 		if i == 0 || r.Total != prevScore {
@@ -185,7 +191,7 @@ GROUP BY t.id, t.name
 		rankings[i] = helpers.TeamRanking{
 			TeamID:   r.TeamID,
 			TeamName: r.TeamName,
-			Total:    r.Total,
+			Total:    int(r.Total), // or keep float if you want decimals in API
 			Rank:     prevRank,
 		}
 	}

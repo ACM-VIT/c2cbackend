@@ -49,6 +49,7 @@ func ConnectToDB() {
     			&models.Submission{},
     			&models.Attendance{},
     			&models.Whitelist{},
+				&models.Notice{},
     		)
 
 		if err != nil {
