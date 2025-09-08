@@ -221,7 +221,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 
 	if currentRound.PPTFlag && input.PPTURL == "" {
 		_ = tx.Rollback()
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ppt_url is required for this round"})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Please upload the ppt file."})
 	}
 
 	// Team size check
@@ -263,7 +263,6 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 		_ = tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update team track"})
 	}
-
 
 	// Create submission
 	submission := models.Submission{
@@ -340,7 +339,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 }
 
 func UpdateTeam(c *fiber.Ctx) error {
-		user, ok := c.Locals("user").(models.User)
+	user, ok := c.Locals("user").(models.User)
 	if !ok {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
@@ -348,13 +347,13 @@ func UpdateTeam(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "User is not in a team"})
 	}
 	type submissionInput struct {
-		GithubURL   *string    `json:"github_url,omitempty"`
-		FigmaURL    *string    `json:"figma_url,omitempty"`
-		Other       *string    `json:"other,omitempty"`
-		TechStack   *[]string  `json:"tech_stack,omitempty"`
+		GithubURL *string   `json:"github_url,omitempty"`
+		FigmaURL  *string   `json:"figma_url,omitempty"`
+		Other     *string   `json:"other,omitempty"`
+		TechStack *[]string `json:"tech_stack,omitempty"`
 	}
 
-    var input submissionInput
+	var input submissionInput
 	if err := c.BodyParser(&input); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
