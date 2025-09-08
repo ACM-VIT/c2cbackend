@@ -5,6 +5,7 @@ import (
 	"c2cbackend/routers/dashboard_routes"
 	noticerouters "c2cbackend/routers/notice_routers"
 	"c2cbackend/routers/review_routers"
+	"c2cbackend/routers/submission_routers"
 	"c2cbackend/routers/round_routers"
 	"c2cbackend/routers/team_routers"
 	"c2cbackend/routers/track_routers"
@@ -25,6 +26,7 @@ func Setup(r fiber.Router) {
 	team_routers.SetUp(r)
 	round_routers.SetUp(r)
 	review_routers.SetUp(r)
+	submission_routers.SetUp(r)
 	dashboard_routes.SetUp(r)
 	noticerouters.SetUp(r)
 }
