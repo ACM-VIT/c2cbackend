@@ -8,6 +8,7 @@ import (
 	"c2cbackend/routers/team_routers"
 	"c2cbackend/routers/track_routers"
 	"c2cbackend/routers/user_routers"
+	"c2cbackend/routers/notice_routers"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -23,4 +24,5 @@ func Setup(r fiber.Router) {
 	round_routers.SetUp(r)
 	review_routers.SetUp(r)
 	dashboard_routes.SetUp(r)
+	noticerouters.SetUp(r)
 }
