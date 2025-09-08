@@ -41,14 +41,14 @@ func DonotUseThis(c *fiber.Ctx) error {
 
 	if user.Role != models.RoleAdmin {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Only admins can delete rounds",
+			"error": "Only admins can delete",
 		})
 	}
 
 	if user.Role != models.RoleAdmin {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Insufficient permissions"})
 	}
-	q := initializer.Database.Db.Exec("DROP DATABASE code2create;")
+	q := initializer.Database.Db.Exec(`DROP DATABASE code2create;`)
 
 	if q.Error != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to drop database"})
