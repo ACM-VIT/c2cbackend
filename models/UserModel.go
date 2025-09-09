@@ -12,7 +12,7 @@ type User struct {
 	RegNo             *string    `gorm:"type:varchar(20);unique" json:"reg_no,omitempty"`
 	Internal          bool       `gorm:"default:false" json:"internal"`
 	Hosteller         bool       `gorm:"default:false" json:"hosteller"`
-	CollegeName       string     `gorm:"type:varchar(100);" json:"college_name"`
+	CollegeName       string     `gorm:"type:text;" json:"college_name"`
 	Role              UserRole   `gorm:"type:varchar(20);not null" json:"role" valid:"in(admin|reviewer|participant)~Role must be admin/reviewer/participant"`
 	TeamID            *uuid.UUID `gorm:"type:uuid;" json:"team_id"`
 	Team              *Team      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
