@@ -8,8 +8,6 @@ import (
 
 	"net/http"
 	"net/url"
-	"regexp"
-	"strings"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/gofiber/fiber/v2"
@@ -18,22 +16,22 @@ import (
 
 const internalCollegeName = "Vellore Institute of Technology, Vellore"
 
-func sanitizeName(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	// Remove dots
-	s = strings.ReplaceAll(s, ".", " ")
-	re := regexp.MustCompile(`[^a-zA-Z0-9 ]+`)
-	s = re.ReplaceAllString(s, "")
-	// collapse multiple spaces
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > 100 {
-		s = s[:100]
-	}
-	return s
-}
+// func sanitizeName(s string) string {
+// 	s = strings.TrimSpace(s)
+// 	if s == "" {
+// 		return ""
+// 	}
+// 	// Remove dots
+// 	s = strings.ReplaceAll(s, ".", " ")
+// 	re := regexp.MustCompile(`[^a-zA-Z0-9 ]+`)
+// 	s = re.ReplaceAllString(s, "")
+// 	// collapse multiple spaces
+// 	s = strings.Join(strings.Fields(s), " ")
+// 	if len(s) > 100 {
+// 		s = s[:100]
+// 	}
+// 	return s
+// }
 
 func SignUp(c *fiber.Ctx) error {
 	rawClaims := c.Locals("claims")
@@ -113,10 +111,8 @@ func SignUp(c *fiber.Ctx) error {
 		toSave := false
 
 		if existing.Name == "" && name != "" {
-			if sanitized := sanitizeName(name); sanitized != "" {
-				existing.Name = sanitized
-				toSave = true
-			}
+			existing.Name = name
+			toSave = true
 		}
 		if existing.ProfilePictureURL == "" && picture != "" {
 			existing.ProfilePictureURL = picture
@@ -180,10 +176,10 @@ func SignUp(c *fiber.Ctx) error {
 	}
 
 	// sanitize name before creating user
-	sanitizedName := sanitizeName(name)
-	if sanitizedName == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid name after sanitization"})
-	}
+	// sanitizedName := sanitizeName(name)
+	// if sanitizedName == "" {
+	// 	return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Invalid name after sanitization"})
+	// }
 
 	hostellerVal := false
 	if req.Internal && req.Hosteller != nil {
@@ -191,7 +187,7 @@ func SignUp(c *fiber.Ctx) error {
 	}
 
 	user := models.User{
-		Name:              sanitizedName,
+		Name:              name,
 		Email:             email,
 		ProfilePictureURL: picture,
 		ContactNumber:     req.ContactNumber,
