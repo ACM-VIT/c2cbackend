@@ -194,7 +194,7 @@ func Dashboard(c *fiber.Ctx) error {
 	}
 
 	// Determine the currently active round based on time (global)
-	now := time.Now()
+	now := time.Now().UTC()
 	{
 		var active models.Round
 		err := db.Model(&models.Round{}).
