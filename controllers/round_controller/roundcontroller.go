@@ -16,12 +16,20 @@ import (
 )
 
 func CreateRound(c *fiber.Ctx) error {
-	var round models.Round
-	if err := c.BodyParser(&round); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
+    var round models.Round
+    if err := c.BodyParser(&round); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "error": "Invalid request body",
+        })
+    }
+
+    // Normalize times to UTC to avoid timezone mismatch
+    if !round.StartTime.IsZero() {
+        round.StartTime = round.StartTime.UTC()
+    }
+    if !round.EndTime.IsZero() {
+        round.EndTime = round.EndTime.UTC()
+    }
 
 	if round.RoundNumber < 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -102,11 +110,19 @@ func UpdateRound(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := c.BodyParser(&round); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
-	}
+    if err := c.BodyParser(&round); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "error": "Invalid request body",
+        })
+    }
+
+    // Normalize times to UTC to avoid timezone mismatch
+    if !round.StartTime.IsZero() {
+        round.StartTime = round.StartTime.UTC()
+    }
+    if !round.EndTime.IsZero() {
+        round.EndTime = round.EndTime.UTC()
+    }
 
 	if err := initializer.Database.Db.Save(&round).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

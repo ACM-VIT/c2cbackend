@@ -85,26 +85,25 @@ func CreateTeam(c *fiber.Ctx) error {
 		}
 	}
 
-	{
-		var earliestRound models.Round
-		err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("start_time IS NOT NULL").
-			Order("start_time ASC").
-			Limit(1).
-			First(&earliestRound).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			_ = tx.Rollback()
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to find earliest round"})
-		}
-		if err == nil {
-			// insert into join table within the same transaction
-			if exec := tx.Exec("INSERT INTO round_teams (round_id, team_id) VALUES (?, ?)", earliestRound.ID, team.ID); exec.Error != nil {
-				_ = tx.Rollback()
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to associate team with earliest round"})
-			}
-		}
-	}
+    {
+        var earliestRound models.Round
+=        err := tx.
+            Clauses(clause.Locking{Strength: "UPDATE"}).
+            Order("round_number ASC").
+            Limit(1).
+            First(&earliestRound).Error
+        if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+            _ = tx.Rollback()
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to find earliest round"})
+        }
+        if err == nil {
+            // insert into join table within the same transaction
+            if exec := tx.Exec("INSERT INTO round_teams (round_id, team_id) VALUES (?, ?)", earliestRound.ID, team.ID); exec.Error != nil {
+                _ = tx.Rollback()
+                return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to associate team with earliest round"})
+            }
+        }
+    }
 
 	// Lock & reload user, then assign team if still free
 	var freshUser models.User
