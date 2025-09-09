@@ -4,7 +4,7 @@ import "github.com/google/uuid"
 
 type User struct {
 	BaseModel
-	Name              string     `gorm:"type:varchar(100);not null" json:"name" valid:"required~Name is required,matches(^[a-zA-Z0-9 ]+$)~Name must be alphabetic"`
+	Name              string     `gorm:"type:varchar(100);not null" json:"name"`
 	Email             string     `gorm:"type:varchar(100);not null;unique" json:"email" valid:"required~Email is required,email~Email is not valid"`
 	ProfilePictureURL string     `gorm:"type:text" json:"profile_picture_url" valid:"url~URL is not valid"`
 	ContactNumber     string     `gorm:"type:varchar(20);not null" json:"contact_number" valid:"required~Contact number is required,numeric~Contact number must be numeric"`
