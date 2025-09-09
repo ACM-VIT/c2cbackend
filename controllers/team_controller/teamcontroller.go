@@ -199,7 +199,7 @@ func CreateTeamSubmission(c *fiber.Ctx) error {
 	}()
 
 	// Load team with active round(s) now
-	now := time.Now()
+	now := time.Now().UTC()
 	var team models.Team
 	if err := tx.
 		Clauses(clause.Locking{Strength: "UPDATE"}).
