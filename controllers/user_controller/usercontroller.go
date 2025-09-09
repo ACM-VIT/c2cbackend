@@ -336,3 +336,16 @@ func GetCollegeByUniversityName(c *fiber.Ctx) error {
 	}
 	return c.Status(http.StatusOK).JSON(fiber.Map{"colleges": colleges})
 }
+
+// Admin-only: List all users with their teams (if any)
+func GetAllUsers(c *fiber.Ctx) error {
+    u, ok := c.Locals("user").(models.User)
+    if !ok || u.Role != models.RoleAdmin {
+        return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+    }
+    var users []models.User
+    if err := initializer.Database.Db.Preload("Team").Find(&users).Error; err != nil {
+        return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch users"})
+    }
+    return c.Status(http.StatusOK).JSON(fiber.Map{"users": users})
+}

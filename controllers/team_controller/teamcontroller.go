@@ -89,8 +89,7 @@ func CreateTeam(c *fiber.Ctx) error {
 		var earliestRound models.Round
 		err := tx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("start_time IS NOT NULL").
-			Order("start_time ASC").
+			Order("round_number ASC").
 			Limit(1).
 			First(&earliestRound).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
