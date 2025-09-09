@@ -139,7 +139,7 @@ func UpdateRound(c *fiber.Ctx) error {
 func GetRoundTeamRankings(c *fiber.Ctx) error {
 	rnoStr := c.Params("rno")
 	rno, err := strconv.Atoi(rnoStr)
-	if err != nil || rno < 1 {
+	if err != nil || rno < 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
 	}
 
