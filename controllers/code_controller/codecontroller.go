@@ -191,39 +191,52 @@ func RequestCode(c *fiber.Ctx) error {
 	}
 	teamID := *user.TeamID
 
-	db := initializer.Database.Db
+    db := initializer.Database.Db
 
-	var teamCodeCount int64
-	db.Model(&models.SponCode{}).
-		Where("team_id = ? AND (status = ? OR status = ?)", teamID, models.StatusPending, models.StatusApproved).
-		Count(&teamCodeCount)
-	if teamCodeCount >= MAX_APPROVED_CODES_PER_TEAM {
-		return fiber.NewError(fiber.StatusBadRequest,
-			fmt.Sprintf("max codes (%d) reached for team", MAX_APPROVED_CODES_PER_TEAM))
-	}
+    // If team already has an approved code, return it (only approved codes are returned)
+    var approved models.SponCode
+    if err := db.Where("team_id = ? AND status = ?", teamID, models.StatusApproved).
+        Order("requested_at ASC").First(&approved).Error; err == nil {
+        return c.Status(fiber.StatusOK).JSON(fiber.Map{
+            "code":         approved.Code,
+            "team_id":      approved.TeamID,
+            "requested_at": approved.RequestedAt,
+            "status":       approved.Status,
+        })
+    } else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+        return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+    }
 
-	var available models.SponCode
-	if err := db.Where("team_id IS NULL").First(&available).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fiber.NewError(fiber.StatusNotFound, "no available codes")
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
-	}
+    // Enforce: no more than 3 pending sponsor code rows per team
+    var pendingCount int64
+    if err := db.Model(&models.SponCode{}).
+        Where("team_id = ? AND status = ?", teamID, models.StatusPending).
+        Count(&pendingCount).Error; err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+    }
+    if pendingCount >= 3 {
+        return fiber.NewError(fiber.StatusBadRequest, "max pending sponsor code requests (3) reached for team")
+    }
 
-	available.TeamID = &teamID
-	available.Status = models.StatusPending
-	available.RequestedAt = time.Now().UTC()
+    // Create a pending entry with no code assigned
+    var codePtr *string = nil
+    row := models.SponCode{
+        ID:          uuid.New(),
+        Code:        codePtr,
+        TeamID:      &teamID,
+        Status:      models.StatusPending,
+        RequestedAt: time.Now().UTC(),
+    }
+    if err := db.Create(&row).Error; err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+    }
 
-	if err := db.Save(&available).Error; err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
-	}
-
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"code":         available.Code,
-		"team_id":      available.TeamID,
-		"requested_at": available.RequestedAt,
-		"status":       available.Status,
-	})
+    // Do not return code here; only acknowledge request
+    return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+        "team_id":      row.TeamID,
+        "requested_at": row.RequestedAt,
+        "status":       row.Status,
+    })
 }
 
 func GetTeamCodes(c *fiber.Ctx) error {
@@ -238,9 +251,9 @@ func GetTeamCodes(c *fiber.Ctx) error {
 	db := initializer.Database.Db
 	var codes []models.SponCode
 
-	if err := db.Where("team_id = ?", *user.TeamID).Find(&codes).Error; err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
-	}
+    if err := db.Where("team_id = ? AND status = ?", *user.TeamID, models.StatusApproved).Find(&codes).Error; err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+    }
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"codes": codes,
