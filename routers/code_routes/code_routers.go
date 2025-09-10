@@ -7,9 +7,13 @@ import (
 )
 
 func SetUp(r fiber.Router) {
-	code := r.Group("/code")
-	code.Post("/seed", codecontroller.SeedCodesFromFile)
-	code.Post("/request", codecontroller.RequestCode)
-	code.Get("/team", codecontroller.GetTeamCodes)
-	code.Post("/assign", codecontroller.AssignCode)
+    code := r.Group("/code")
+    code.Post("/seed", codecontroller.SeedCodesFromFile)
+    code.Post("/request", codecontroller.RequestCode)
+    code.Get("/team", codecontroller.GetTeamCodes)
+    code.Post("/assign", codecontroller.AssignCode)
+    // Admin helpers
+    code.Get("/pending", codecontroller.ListPendingRequests)
+    code.Get("/available", codecontroller.ListAvailableCodes)
+    code.Post("/admin/assign", codecontroller.AdminAssignAvailableCode)
 }
