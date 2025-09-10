@@ -17,6 +17,8 @@ type User struct {
 	TeamID            *uuid.UUID `gorm:"type:uuid;" json:"team_id"`
 	Team              *Team      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
 	CheckedIn         bool       `gorm:"default:false" json:"checked_in,omitempty"`
+	RoomNumber        *string    `gorm:"type:varchar(10);" json:"room_number,omitempty"`
+	Block             *string    `gorm:"type:varchar(10);" json:"block,omitempty"`
 }
 
 type UserRole string
@@ -33,5 +35,21 @@ func IsValidRole(role UserRole) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// SetRoomBlock safely sets the room number and block fields (uses pointers internally)
+func (u *User) SetRoomBlock(room, block string) {
+	if room == "" {
+		u.RoomNumber = nil
+	} else {
+		r := room
+		u.RoomNumber = &r
+	}
+	if block == "" {
+		u.Block = nil
+	} else {
+		b := block
+		u.Block = &b
 	}
 }
