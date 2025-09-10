@@ -25,12 +25,20 @@ func GetTeam(c *fiber.Ctx) error {
 }
 
 func GetAllTeams(c *fiber.Ctx) error {
-	var teams []models.Team
-	if err := initializer.Database.Db.
-		Preload("Users").
-		Find(&teams).Error; err != nil {
-		return &fiber.Error{Code: 500, Message: "Failed to retrieve teams"}
-	}
+    // Admin only
+    if u := c.Locals("user"); u != nil {
+        if user, ok := u.(models.User); ok {
+            if user.Role != models.RoleAdmin {
+                return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+            }
+        }
+    }
+    var teams []models.Team
+    if err := initializer.Database.Db.
+        Preload("Users").
+        Find(&teams).Error; err != nil {
+        return &fiber.Error{Code: 500, Message: "Failed to retrieve teams"}
+    }
 
 	return c.JSON(fiber.Map{
 		"message": "Teams retrieved successfully",

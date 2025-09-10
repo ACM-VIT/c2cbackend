@@ -37,7 +37,7 @@ func Dashboard(c *fiber.Ctx) error {
 		Select([]string{
 			"id", "created_at", "updated_at",
 			"name", "email", "profile_picture_url", "contact_number",
-			"gender", "reg_no", "internal", "college_name", "role", "team_id",
+			"gender", "reg_no", "internal", "college_name", "role", "team_id","room_number","block",
 		}).
 		Where("id = ?", ctxUser.ID).
 		Preload("Team", func(db *gorm.DB) *gorm.DB {
@@ -194,7 +194,7 @@ func Dashboard(c *fiber.Ctx) error {
 	}
 
 	// Determine the currently active round based on time (global)
-	now := time.Now()
+	now := time.Now().UTC()
 	{
 		var active models.Round
 		err := db.Model(&models.Round{}).

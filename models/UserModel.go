@@ -4,7 +4,7 @@ import "github.com/google/uuid"
 
 type User struct {
 	BaseModel
-	Name              string     `gorm:"type:varchar(100);not null" json:"name" valid:"required~Name is required,matches(^[a-zA-Z0-9 ]+$)~Name must be alphabetic"`
+	Name              string     `gorm:"type:varchar(100);not null" json:"name"`
 	Email             string     `gorm:"type:varchar(100);not null;unique" json:"email" valid:"required~Email is required,email~Email is not valid"`
 	ProfilePictureURL string     `gorm:"type:text" json:"profile_picture_url" valid:"url~URL is not valid"`
 	ContactNumber     string     `gorm:"type:varchar(20);not null" json:"contact_number" valid:"required~Contact number is required,numeric~Contact number must be numeric"`
@@ -12,11 +12,13 @@ type User struct {
 	RegNo             *string    `gorm:"type:varchar(20);unique" json:"reg_no,omitempty"`
 	Internal          bool       `gorm:"default:false" json:"internal"`
 	Hosteller         bool       `gorm:"default:false" json:"hosteller"`
-	CollegeName       string     `gorm:"type:varchar(100);" json:"college_name"`
+	CollegeName       string     `gorm:"type:text;" json:"college_name"`
 	Role              UserRole   `gorm:"type:varchar(20);not null" json:"role" valid:"in(admin|reviewer|participant)~Role must be admin/reviewer/participant"`
 	TeamID            *uuid.UUID `gorm:"type:uuid;" json:"team_id"`
 	Team              *Team      `gorm:"foreignKey:TeamID" json:"team,omitempty"`
 	CheckedIn         bool       `gorm:"default:false" json:"checked_in,omitempty"`
+	RoomNumber        *string    `gorm:"type:varchar(10);" json:"room_number,omitempty"`
+	Block             *string    `gorm:"type:varchar(10);" json:"block,omitempty"`
 }
 
 type UserRole string
@@ -33,5 +35,21 @@ func IsValidRole(role UserRole) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// SetRoomBlock safely sets the room number and block fields (uses pointers internally)
+func (u *User) SetRoomBlock(room, block string) {
+	if room == "" {
+		u.RoomNumber = nil
+	} else {
+		r := room
+		u.RoomNumber = &r
+	}
+	if block == "" {
+		u.Block = nil
+	} else {
+		b := block
+		u.Block = &b
 	}
 }

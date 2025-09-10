@@ -34,7 +34,7 @@ func MarkAttendance(c *fiber.Ctx) error {
 		
 		attendance := models.Attendance{
 			UserID:    user.ID,
-			Timestamp: time.Now(),
+			Timestamp: time.Now().UTC(),
 		}
 		
 		if err := db.Create(&attendance).Error; err != nil {

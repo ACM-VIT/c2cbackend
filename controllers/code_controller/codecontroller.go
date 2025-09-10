@@ -212,7 +212,7 @@ func RequestCode(c *fiber.Ctx) error {
 
 	available.TeamID = &teamID
 	available.Status = models.StatusPending
-	available.RequestedAt = time.Now()
+	available.RequestedAt = time.Now().UTC()
 
 	if err := db.Save(&available).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
