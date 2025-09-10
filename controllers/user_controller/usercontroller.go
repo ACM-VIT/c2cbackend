@@ -66,7 +66,9 @@ func SignUp(c *fiber.Ctx) error {
 		Role          models.UserRole `json:"role"`
 		Internal      bool            `json:"internal"`
 		CollegeName   string          `json:"college_name"`
-		Hosteller     *bool           `json:"hosteller"` // NEW: pointer to detect presence
+		Hosteller     *bool           `json:"hosteller"`   // NEW: pointer to detect presence
+		RoomNumber    string          `json:"room_number,omitempty"` // NEW: room number for internal participants
+		Block         string          `json:"block,omitempty"`       // NEW: block for internal participants
 	}
 	var req body
 	if err := c.BodyParser(&req); err != nil {
@@ -84,6 +86,17 @@ func SignUp(c *fiber.Ctx) error {
 		if req.Hosteller == nil {
 			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 				"error": "Hosteller flag is required for internal participants",
+			})
+		}
+		// Require room and block for internal participants
+		if req.RoomNumber == "" {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "Room number is required for internal participants",
+			})
+		}
+		if req.Block == "" {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "Block is required for internal participants",
 			})
 		}
 	}
@@ -127,9 +140,34 @@ func SignUp(c *fiber.Ctx) error {
 				existing.Hosteller = *req.Hosteller
 				toSave = true
 			}
+
+			// Update room and block if provided
+			if req.RoomNumber != "" {
+				if existing.RoomNumber == nil || *existing.RoomNumber != req.RoomNumber {
+					rn := req.RoomNumber
+					existing.RoomNumber = &rn
+					toSave = true
+				}
+			}
+			if req.Block != "" {
+				if existing.Block == nil || *existing.Block != req.Block {
+					b := req.Block
+					existing.Block = &b
+					toSave = true
+				}
+			}
 		} else {
 			if req.CollegeName != "" && existing.CollegeName == "" {
 				existing.CollegeName = req.CollegeName
+				toSave = true
+			}
+			// Clear room and block for external participants
+			if existing.RoomNumber != nil {
+				existing.RoomNumber = nil
+				toSave = true
+			}
+			if existing.Block != nil {
+				existing.Block = nil
 				toSave = true
 			}
 		}
@@ -204,6 +242,13 @@ func SignUp(c *fiber.Ctx) error {
 		Role:        role,
 	}
 
+	// Set room and block on the user (uses pointer helpers inside model)
+	if req.Internal {
+		user.SetRoomBlock(req.RoomNumber, req.Block)
+	} else {
+		user.SetRoomBlock("", "")
+	}
+
 	if !req.Internal {
 		user.RegNo = nil
 	}
@@ -219,6 +264,8 @@ func SignUp(c *fiber.Ctx) error {
 	// Ensure DB column reg_no is NULL for external participants
 	if !req.Internal {
 		_ = initializer.Database.Db.Model(&user).UpdateColumn("reg_no", gorm.Expr("NULL")).Error
+		// also ensure room and block columns are NULL
+		_ = initializer.Database.Db.Model(&user).Updates(map[string]interface{}{"room_number": gorm.Expr("NULL"), "block": gorm.Expr("NULL")}).Error
 	}
 
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
@@ -339,13 +386,13 @@ func GetCollegeByUniversityName(c *fiber.Ctx) error {
 
 // Admin-only: List all users with their teams (if any)
 func GetAllUsers(c *fiber.Ctx) error {
-    u, ok := c.Locals("user").(models.User)
-    if !ok || u.Role != models.RoleAdmin {
-        return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
-    }
-    var users []models.User
-    if err := initializer.Database.Db.Preload("Team").Find(&users).Error; err != nil {
-        return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch users"})
-    }
-    return c.Status(http.StatusOK).JSON(fiber.Map{"users": users})
+	u, ok := c.Locals("user").(models.User)
+	if !ok || u.Role != models.RoleAdmin {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+	var users []models.User
+	if err := initializer.Database.Db.Preload("Team").Find(&users).Error; err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch users"})
+	}
+	return c.Status(http.StatusOK).JSON(fiber.Map{"users": users})
 }
