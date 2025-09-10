@@ -321,7 +321,7 @@ func ListAvailableCodes(c *fiber.Ctx) error {
     db := initializer.Database.Db
     var rows []models.SponCode
     if err := db.Where("team_id IS NULL AND code IS NOT NULL").
-        Order("created_at ASC").
+        // Order("created_at ASC").
         Find(&rows).Error; err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, err.Error())
     }
