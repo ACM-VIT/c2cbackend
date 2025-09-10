@@ -83,22 +83,19 @@ func SignUp(c *fiber.Ctx) error {
 	}
 
 	if req.Internal {
-		if req.Hosteller == nil {
-			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-				"error": "Hosteller flag is required for internal participants",
-			})
+		if req.Hosteller != nil && *req.Hosteller {
+			if req.RoomNumber == "" {
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": "Room number is required for internal participants",
+				})
+			}
+			if req.Block == "" {
+				return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+					"error": "Block is required for internal participants",
+				})
+			}
 		}
-		// Require room and block for internal participants
-		if req.RoomNumber == "" {
-			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-				"error": "Room number is required for internal participants",
-			})
-		}
-		if req.Block == "" {
-			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-				"error": "Block is required for internal participants",
-			})
-		}
+	
 	}
 
 	if req.Internal && req.RegNo == "" {
