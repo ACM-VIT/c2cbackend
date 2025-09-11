@@ -20,6 +20,6 @@ type PromoteResponse struct {
 type TeamRanking struct {
 	TeamID   uuid.UUID `json:"team_id"`
 	TeamName string    `json:"team_name"`
-	Total    int       `json:"total_score"`
+	Total    float64   `json:"total_score"`
 	Rank     int       `json:"rank"`
 }

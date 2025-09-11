@@ -6,6 +6,7 @@ import (
 	"c2cbackend/models"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
@@ -16,20 +17,20 @@ import (
 )
 
 func CreateRound(c *fiber.Ctx) error {
-    var round models.Round
-    if err := c.BodyParser(&round); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-            "error": "Invalid request body",
-        })
-    }
+	var round models.Round
+	if err := c.BodyParser(&round); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
 
-    // Normalize times to UTC to avoid timezone mismatch
-    if !round.StartTime.IsZero() {
-        round.StartTime = round.StartTime.UTC()
-    }
-    if !round.EndTime.IsZero() {
-        round.EndTime = round.EndTime.UTC()
-    }
+	// Normalize times to UTC to avoid timezone mismatch
+	if !round.StartTime.IsZero() {
+		round.StartTime = round.StartTime.UTC()
+	}
+	if !round.EndTime.IsZero() {
+		round.EndTime = round.EndTime.UTC()
+	}
 
 	if round.RoundNumber < 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -110,19 +111,19 @@ func UpdateRound(c *fiber.Ctx) error {
 		})
 	}
 
-    if err := c.BodyParser(&round); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-            "error": "Invalid request body",
-        })
-    }
+	if err := c.BodyParser(&round); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
 
-    // Normalize times to UTC to avoid timezone mismatch
-    if !round.StartTime.IsZero() {
-        round.StartTime = round.StartTime.UTC()
-    }
-    if !round.EndTime.IsZero() {
-        round.EndTime = round.EndTime.UTC()
-    }
+	// Normalize times to UTC to avoid timezone mismatch
+	if !round.StartTime.IsZero() {
+		round.StartTime = round.StartTime.UTC()
+	}
+	if !round.EndTime.IsZero() {
+		round.EndTime = round.EndTime.UTC()
+	}
 
 	if err := initializer.Database.Db.Save(&round).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -153,8 +154,8 @@ func GetRoundTeamRankings(c *fiber.Ctx) error {
 	type row struct {
 		TeamID   uuid.UUID `gorm:"column:team_id"`
 		TeamName string    `gorm:"column:team_name"`
-		// Use float to handle weighted sum properly
-		Total float64 `gorm:"column:total"`
+		Total100 float64   `gorm:"column:total_100"`
+		JudgeCnt int       `gorm:"column:judge_count"`
 	}
 
 	var rows []row
@@ -163,13 +164,14 @@ func GetRoundTeamRankings(c *fiber.Ctx) error {
 SELECT
   t.id   AS team_id,
   t.name AS team_name,
-  COALESCE(SUM(
-      (s.innovation_relevance          * 0.20)
-    + (s.technical_depth_complexity    * 0.25)
-    + (s.implementation_functionality * 0.20)
-    + (s.user_experience_presentation * 0.20)
-    + (s.progress_development         * 0.15)
-  ), 0) AS total
+  5.0 * COALESCE(SUM(
+        COALESCE(s.innovation_relevance,          0) * 0.20
+      + COALESCE(s.technical_depth_complexity,    0) * 0.25
+      + COALESCE(s.implementation_functionality,  0) * 0.20
+      + COALESCE(s.user_experience_presentation,  0) * 0.20
+      + COALESCE(s.progress_development,          0) * 0.15
+  ), 0) AS total_100,
+  COUNT(DISTINCT r.id) AS judge_count
 FROM teams t
 JOIN round_teams rt
   ON rt.team_id = t.id
@@ -188,26 +190,26 @@ GROUP BY t.id, t.name
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch team rankings"})
 	}
 
-	// Sort by weighted total
+	const eps = 1e-9
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Total == rows[j].Total {
+		if math.Abs(rows[i].Total100-rows[j].Total100) < eps {
 			return rows[i].TeamName < rows[j].TeamName
 		}
-		return rows[i].Total > rows[j].Total
+		return rows[i].Total100 > rows[j].Total100
 	})
 
 	rankings := make([]helpers.TeamRanking, len(rows))
-	prevScore := -1.0
+	prevScore := math.Inf(+1)
 	prevRank := 0
 	for i, r := range rows {
-		if i == 0 || r.Total != prevScore {
+		if i == 0 || math.Abs(r.Total100-prevScore) >= eps {
 			prevRank = i + 1
-			prevScore = r.Total
+			prevScore = r.Total100
 		}
 		rankings[i] = helpers.TeamRanking{
 			TeamID:   r.TeamID,
 			TeamName: r.TeamName,
-			Total:    int(r.Total), // or keep float if you want decimals in API
+			Total:    math.Round(r.Total100*100) / 100,
 			Rank:     prevRank,
 		}
 	}
@@ -229,7 +231,6 @@ func PromoteToRound(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "only admins can promote teams to the next round"})
 	}
 
-	// rno represents the NEXT round number you want to promote into
 	roundNumber, err := strconv.Atoi(c.Params("rno"))
 	if err != nil || roundNumber < 1 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid round number"})
