@@ -52,7 +52,7 @@ type Team struct {
 	FigmaURL             string      `gorm:"type:varchar(255);" json:"figma_url,omitempty"`
 	TechStack            StringArray `gorm:"type:json" json:"tech_stack,omitempty"`
 	Other                string      `gorm:"type:varchar(255);" json:"other,omitempty"`
-	GitHubInstallationID string      `json:"github_installation_id"`
+    GitHubInstallationID string      `json:"github_installation_id"`
 	TrackID              *uuid.UUID  `json:"track_id"`
 	Track                Track       `gorm:"foreignKey:TrackID" json:"track"`
 	Users                []User      `json:"users"`

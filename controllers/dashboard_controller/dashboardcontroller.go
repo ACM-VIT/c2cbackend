@@ -41,13 +41,14 @@ func Dashboard(c *fiber.Ctx) error {
 		}).
 		Where("id = ?", ctxUser.ID).
 		Preload("Team", func(db *gorm.DB) *gorm.DB {
-			return db.Select([]string{
-				"id", "created_at", "updated_at",
-				"name", "description", "code",
-				"github_url", "figma_url", "other",
-				"track_id", "tech_stack",
-			})
-		}).
+            return db.Select([]string{
+                "id", "created_at", "updated_at",
+                "name", "description", "code",
+                "github_url", "figma_url", "other",
+                "git_hub_installation_id",
+                "track_id", "tech_stack",
+            })
+        }).
 		Preload("Team.Track", func(db *gorm.DB) *gorm.DB {
 			return db.Select([]string{"id", "created_at", "updated_at", "title", "description"})
 		}).
@@ -87,7 +88,8 @@ func Dashboard(c *fiber.Ctx) error {
 			"description": user.Team.Description,
 			"code":        user.Team.Code,
 			"github_url":  user.Team.GithubURL,
-			"figma_url":   user.Team.FigmaURL,
+            "github_installation_id": user.Team.GitHubInstallationID,
+            "figma_url":   user.Team.FigmaURL,
 			"other":       user.Team.Other,
 			"track_id":    user.Team.TrackID,
 			"tech_stack":  user.Team.TechStack,
