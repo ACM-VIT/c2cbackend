@@ -40,10 +40,7 @@ func SaveInstallation(c *fiber.Ctx) error {
         return &fiber.Error{Code: fiber.StatusInternalServerError, Message: "failed to load team"}
     }
 
-    team.GithubInstallationID = body.InstallationID
-    if body.RepoFullName != nil {
-        team.GithubRepoFullName = *body.RepoFullName
-    }
+    team.GitHubInstallationID = body.InstallationID
 
     if err := db.Save(&team).Error; err != nil {
         return &fiber.Error{Code: fiber.StatusInternalServerError, Message: "failed to save team"}
@@ -51,8 +48,7 @@ func SaveInstallation(c *fiber.Ctx) error {
 
     return c.Status(fiber.StatusOK).JSON(fiber.Map{
         "message":            "saved",
-        "installation_id":    team.GithubInstallationID,
-        "repo_full_name":     team.GithubRepoFullName,
+        "installation_id":    team.GitHubInstallationID,
         "team_id":            team.ID,
     })
 }
